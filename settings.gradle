@@ -1,0 +1,12 @@
+rootProject.name = 'MCreatorVCSPlugin'
+
+def mcreatorPath = providers.gradleProperty('mcreator_path').orNull
+if (!mcreatorPath) {
+    throw new GradleException('Set mcreator_path in gradle.properties to your MCreator source checkout.')
+}
+def mcreatorDir = file(mcreatorPath)
+if (!new File(mcreatorDir, 'build.gradle').isFile()) {
+    throw new GradleException("mcreator_path does not point to an MCreator source checkout: ${mcreatorDir}")
+}
+include ':MCreator'
+project(':MCreator').projectDir = mcreatorDir

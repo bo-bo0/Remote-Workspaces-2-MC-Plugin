@@ -1,0 +1,138 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+
+plugins {
+    id 'java'
+    id 'idea'
+}
+
+allprojects {
+    repositories {
+        mavenCentral()
+        maven { url = 'https://repo.gradle.org/gradle/libs-releases' }
+        flatDir { dirs rootProject.file(mcreator_path + '/lib') }
+    }
+}
+
+group = 'net.mcreator.vcs'
+version = new JsonSlurper().parse(file('src/main/resources/plugin.json')).info.version
+
+evaluationDependsOn(':MCreator')
+def mcreator = project(':MCreator')
+// MCreator uses JBR with JCEF; a standard JDK cannot compile its Chromium UI.
+mcreator.java.toolchain.vendor = JvmVendorSpec.JETBRAINS
+java.toolchain.languageVersion = mcreator.java.toolchain.languageVersion
+java.toolchain.vendor = JvmVendorSpec.JETBRAINS
+mcreator.layout.buildDirectory = layout.buildDirectory.dir('mcreator')
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+idea {
+    module {
+        inheritOutputDirs = true
+        excludeDirs += files('.github', '.gradle', '.idea', 'build', 'gradle', 'jdk', 'license', 'logs')
+    }
+}
+
+configurations {
+    export {
+        canBeConsumed = false
+        canBeResolved = true
+    }
+    implementation.extendsFrom export
+}
+
+def jgitVersion = mcreator.configurations.implementation.dependencies.find {
+    it.group == 'org.eclipse.jgit' && it.name == 'org.eclipse.jgit'
+}?.version ?: '7.7.0.202606012155-r'
+
+dependencies {
+    compileOnly mcreator.sourceSets.main.output
+    compileOnly files(mcreator.sourceSets.main.compileClasspath)
+    export "org.eclipse.jgit:org.eclipse.jgit:${jgitVersion}"
+    export "org.eclipse.jgit:org.eclipse.jgit.gpg.bc:${jgitVersion}"
+    export "org.eclipse.jgit:org.eclipse.jgit.ssh.apache:${jgitVersion}"
+}
+
+def mergedServices = layout.buildDirectory.dir('export/services')
+def mergeServiceProviders = tasks.register('mergeServiceProviders') {
+    inputs.files(configurations.export)
+    outputs.dir(mergedServices)
+    doLast {
+        def services = new TreeMap<String, Set<String>>()
+        configurations.export.each { dependency ->
+            def tree = dependency.isDirectory() ? fileTree(dependency) : zipTree(dependency)
+            tree.matching { include 'META-INF/services/**' }.each { service ->
+                def providers = services.computeIfAbsent(service.name) { new LinkedHashSet<String>() }
+                service.eachLine('UTF-8') { line ->
+                    def provider = line.split('#', 2)[0].trim()
+                    if (!provider.isEmpty()) {
+                        providers.add(provider)
+                    }
+                }
+            }
+        }
+        def destination = mergedServices.get().asFile
+        delete destination
+        destination.mkdirs()
+        services.each { name, providers ->
+            new File(destination, name).setText(providers.join('\n') + '\n', 'UTF-8')
+        }
+    }
+}
+
+tasks.named('jar', Jar) {
+    description = 'Builds the installable MCreator plugin ZIP.'
+    archiveFileName = "mcreator-vcs-${project.version}.zip"
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+    from 'LICENSE.txt'
+    from('license') { into 'license' }
+    from({
+        configurations.export.collect { dependency ->
+            (dependency.isDirectory() ? fileTree(dependency) : zipTree(dependency)).matching {
+                exclude 'META-INF/**', 'OSGI-INF/**', 'about.html'
+            }
+        }
+    })
+    from(mergeServiceProviders) { into 'META-INF/services' }
+}
+
+// Keep only the current archive in the development loader's directory.
+def runHome = layout.buildDirectory.dir('run/mcreator-home')
+def prepareRunPlugins = tasks.register('prepareRunPlugins', Sync) {
+    from tasks.named('jar')
+    into layout.buildDirectory.dir('run/plugins')
+}
+
+tasks.register('runM', JavaExec) {
+    group = 'application'
+    description = 'Runs MCreator with the freshly built VCS plugin loaded.'
+    dependsOn prepareRunPlugins
+    environment 'MCREATOR_PLUGINS_FOLDER', layout.buildDirectory.dir('run/plugins').get().asFile.absolutePath
+    environment 'MCREATOR_PLUGINS_DEV', 'true'
+    environment 'MCREATOR_HOME', runHome.get().asFile.absolutePath
+    doFirst {
+        def preferencesFile = new File(runHome.get().asFile, 'userpreferences')
+        preferencesFile.parentFile.mkdirs()
+        def preferences = preferencesFile.isFile() ? new JsonSlurper().parse(preferencesFile) : [:]
+        preferences.core = preferences.core ?: [:]
+        preferences.core.hidden = preferences.core.hidden ?: [:]
+        preferences.core.hidden.enableJavaPlugins = true
+        preferencesFile.setText(JsonOutput.prettyPrint(JsonOutput.toJson(preferences)), 'UTF-8')
+    }
+    javaLauncher = javaToolchains.launcherFor(mcreator.java.toolchain)
+    jvmArgs mcreator.tasks.named('runMCreator', JavaExec).get().jvmArgs
+    classpath = mcreator.sourceSets.main.runtimeClasspath
+    mainClass = 'net.mcreator.Launcher'
+    workingDir = mcreator.projectDir
+}
+
+tasks.register('runMCreatorWithPlugin') {
+    group = 'application'
+    description = 'Alias for runM.'
+    dependsOn tasks.named('runM')
+}

@@ -1,0 +1,12 @@
+{
+  "id": "vcs2",
+  "weight": 10,
+  "supportedversions": [
+    2026002
+  ],
+  "javaplugin": "net.mcreator.vcs.Launcher",
+  "info": {
+    "name": "Defeatomizer's MCreator VCS plugin came back to life because I didn't have anything better to do",
+    "author": "bo bo"
+  }
+}
