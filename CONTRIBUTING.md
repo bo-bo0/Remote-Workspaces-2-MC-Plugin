@@ -3,8 +3,7 @@
 Use an MCreator source checkout with Java 25 / JBR and JGit 7. Run MCreator's
 `initialSetup` task first if its bundled JBR has not been downloaded yet.
 
-Create a local `gradle.properties` (ignored by Git), or copy
-`gradle.properties.example`, and adjust these paths:
+Create a local `gradle.properties` and adjust these paths:
 
 ```properties
 mcreator_path=...
