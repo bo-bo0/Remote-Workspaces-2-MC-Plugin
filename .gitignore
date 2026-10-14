@@ -4,6 +4,7 @@
 **/.idea/modules.xml
 **/.idea/uiDesigner.xml
 **/.idea/workspace.xml
+.idea
 
 # Ignore Gradle project-specific cache directory
 .gradle
@@ -12,3 +13,4 @@ build/
 /out/
 
 gradle.properties
+.github
