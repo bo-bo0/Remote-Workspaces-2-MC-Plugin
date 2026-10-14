@@ -15,7 +15,7 @@ allprojects {
 }
 
 group = 'net.mcreator.vcs'
-version = new JsonSlurper().parse(file('src/main/resources/plugin.json')).info.version
+version = new JsonSlurper().parse(file('src/main/resources/plugin.json')).version
 
 evaluationDependsOn(':MCreator')
 def mcreator = project(':MCreator')
@@ -85,7 +85,7 @@ def mergeServiceProviders = tasks.register('mergeServiceProviders') {
 
 tasks.named('jar', Jar) {
     description = 'Builds the installable MCreator plugin ZIP.'
-    archiveFileName = "mcreator-vcs-${project.version}.zip"
+    archiveFileName = "remote-workspaces-2-v${project.version}.zip"
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     preserveFileTimestamps = false
     reproducibleFileOrder = true
