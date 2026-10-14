@@ -1,6 +1,7 @@
 {
   "id": "vcs2",
   "weight": 10,
+  "version": "1.0.0",
   "supportedversions": [
     2026002
   ],
