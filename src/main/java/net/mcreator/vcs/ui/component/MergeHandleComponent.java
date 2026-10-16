@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -29,6 +30,7 @@ import net.mcreator.workspace.settings.WorkspaceSettings;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.ItemEvent;
 import java.util.List;
 import java.util.Locale;
 
@@ -62,8 +64,14 @@ public class MergeHandleComponent extends JPanel {
 		add("West", local);
 		add("East", remote);
 
-		local.addActionListener(e -> mergeHandle.selectResultSide(ResultSide.LOCAL));
-		remote.addActionListener(e -> mergeHandle.selectResultSide(ResultSide.REMOTE));
+		local.addItemListener(e -> {
+			if (e.getStateChange() == ItemEvent.SELECTED)
+				mergeHandle.selectResultSide(ResultSide.LOCAL);
+		});
+		remote.addItemListener(e -> {
+			if (e.getStateChange() == ItemEvent.SELECTED)
+				mergeHandle.selectResultSide(ResultSide.REMOTE);
+		});
 
 		ButtonGroup buttonGroup = new ButtonGroup();
 		buttonGroup.add(local);

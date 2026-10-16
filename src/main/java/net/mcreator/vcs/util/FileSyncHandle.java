@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -127,11 +128,11 @@ public class FileSyncHandle {
 
 	public DiffEntry.ChangeType getChangeTypeRelativeToRemote() {
 		if (baseBytes == null)
-			if (localBytes != null)
+			if (remoteBytes != null)
 				return DiffEntry.ChangeType.ADD;
 
 		if (baseBytes != null)
-			if (localBytes == null)
+			if (remoteBytes == null)
 				return DiffEntry.ChangeType.DELETE;
 
 		if (baseBytes != null)

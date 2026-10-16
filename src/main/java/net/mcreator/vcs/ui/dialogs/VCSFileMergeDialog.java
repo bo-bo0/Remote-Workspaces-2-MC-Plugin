@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,6 +22,7 @@ package net.mcreator.vcs.ui.dialogs;
 
 import net.mcreator.ui.MCreator;
 import net.mcreator.ui.component.util.PanelUtils;
+import net.mcreator.ui.component.util.ThreadUtil;
 import net.mcreator.ui.dialogs.MCreatorDialog;
 import net.mcreator.ui.init.L10N;
 import net.mcreator.ui.laf.themes.Theme;
@@ -38,7 +40,12 @@ public class VCSFileMergeDialog {
 		if (unmergedPaths.isEmpty())
 			return;
 
-		MCreatorDialog dialog = new MCreatorDialog(mcreator, L10N.t("dialog.vcs.file_merge_manual_required"));
+		ThreadUtil.runOnSwingThreadAndWait(() -> showDialog(mcreator, unmergedPaths));
+	}
+
+	private static void showDialog(MCreator mcreator, List<MergeHandle<FileSyncHandle>> unmergedPaths) {
+		MCreatorDialog dialog = new MCreatorDialog(mcreator, L10N.t("dialog.vcs.file_merge_manual_required"), true);
+		dialog.setClosable(false);
 
 		JPanel merges = new JPanel();
 		merges.setLayout(new BoxLayout(merges, BoxLayout.Y_AXIS));
@@ -61,7 +68,7 @@ public class VCSFileMergeDialog {
 		scrollPane.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
 
 		JButton finish = L10N.button("dialog.vcs.file_merge_finish");
-		finish.addActionListener(e -> mergeHandleComponents.forEach(mhc -> mhc.local.setSelected(true)));
+		finish.addActionListener(e -> dialog.dispose());
 
 		dialog.getContentPane().add("Center", scrollPane);
 		dialog.getContentPane().add("North", L10N.label("dialog.vcs.file_merge_manual_message"));

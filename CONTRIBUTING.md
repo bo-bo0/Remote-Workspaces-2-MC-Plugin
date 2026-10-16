@@ -17,10 +17,20 @@ Use Java 25 to run the Gradle wrapper. The wrapper uses Gradle 9.6.0.
 
 Build the plugin with the jar gradle task:
 
-The ZIP is written to `build/libs/mcreator-vcs-<plugin version>.zip`, including
+The ZIP is written to `build/libs/remote-workspaces-2-v<plugin version>.zip`, including
 compiled classes, resources, bundled dependencies, licenses and merged service
 providers. MCreator's own classes and dependencies are used for compilation
 without being bundled into the plugin.
+
+Run the plugin regression suite with `./gradlew :test`, or
+`.\gradlew.bat :test` on Windows. The Swing tests need a graphical desktop
+or a virtual display. Test preferences are isolated in `build/test/mcreator-home`;
+Git tests use temporary repositories. Results are written to
+`build/reports/tests/test/index.html`.
+
+Use `:test :jar` to test and package only the plugin. Unqualified task names
+also select matching tasks in the MCreator subproject, whose integration suite
+requires its own generator and plugin setup.
 
 Launch MCreator with the freshly built plugin using the runM gradle task.
 

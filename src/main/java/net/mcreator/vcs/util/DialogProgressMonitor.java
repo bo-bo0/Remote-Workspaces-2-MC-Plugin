@@ -1,6 +1,7 @@
 /*
  * MCreator VCS plugin
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,14 +19,17 @@
 
 package net.mcreator.vcs.util;
 
+import net.mcreator.ui.component.util.ThreadUtil;
 import net.mcreator.ui.dialogs.ProgressDialog;
 import net.mcreator.ui.init.L10N;
 import org.eclipse.jgit.lib.ProgressMonitor;
 
+import javax.swing.*;
 import java.awt.*;
 import java.util.Stack;
 import java.util.concurrent.Callable;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
 
 public class DialogProgressMonitor implements ProgressMonitor {
 	private final String title;
@@ -35,26 +39,35 @@ public class DialogProgressMonitor implements ProgressMonitor {
 	private int tasksCurrent, doneCurrent;
 
 	public static <T> T runTask(DialogProgressMonitor monitor, String threadName, Callable<T> task) throws Exception {
-		AtomicReference<T> result = new AtomicReference<>();
-		AtomicReference<Exception> exception = new AtomicReference<>();
-
-		Runnable runnable = () -> {
+		FutureTask<T> result = new FutureTask<>(() -> {
 			try {
-				result.set(task.call());
+				return task.call();
 			} catch (Exception ex) {
-				monitor.fail();
-				exception.set(ex);
-			} finally {
-				monitor.setVisible(false);
+				SwingUtilities.invokeLater(monitor::fail);
+				throw ex;
+			}
+		}) {
+			@Override protected void done() {
+				SwingUtilities.invokeLater(() -> monitor.setVisible(false));
 			}
 		};
-		(threadName != null ? new Thread(runnable, threadName) : new Thread(runnable)).start();
-		monitor.setVisible(true);
+		ThreadUtil.runOnSwingThreadAndWait(() -> {
+			(threadName != null ? new Thread(result, threadName) : new Thread(result)).start();
+			monitor.setVisible(true);
+		});
 
-		if (exception.get() != null)
-			throw exception.get();
-
-		return result.get();
+		try {
+			return result.get();
+		} catch (InterruptedException ex) {
+			Thread.currentThread().interrupt();
+			throw ex;
+		} catch (ExecutionException ex) {
+			if (ex.getCause() instanceof Exception cause)
+				throw cause;
+			if (ex.getCause() instanceof Error cause)
+				throw cause;
+			throw new IllegalStateException(ex.getCause());
+		}
 	}
 
 	public DialogProgressMonitor(Window parent, String title) {
