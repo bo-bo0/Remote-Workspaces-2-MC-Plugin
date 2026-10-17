@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -28,13 +29,18 @@ import org.eclipse.jgit.lib.ObjectLoader;
 import org.eclipse.jgit.merge.MergeStrategy;
 import org.eclipse.jgit.merge.RecursiveMerger;
 import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.treewalk.AbstractTreeIterator;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class SyncTwoRefsWithMerge {
 
@@ -42,12 +48,18 @@ public class SyncTwoRefsWithMerge {
 			ICustomSyncHandler customSyncHandler, @Nullable PreCustomMergeAction preCustomMergeAction, boolean dryRun)
 			throws GitAPIException, IOException {
 
+		try (RevWalk walk = new RevWalk(git.getRepository())) {
+			if (walk.isMergedInto(walk.parseCommit(remote), walk.parseCommit(local)))
+				return new SyncResult(false, false);
+		}
+
 		RecursiveMerger merger = (RecursiveMerger) MergeStrategy.RECURSIVE.newMerger(git.getRepository(),
 				true); // in core -> dry run
 		boolean requiredCustomMergeHandler = !merger.merge(local,
 				remote); // first we check if there are merge conflicts
 
 		List<FileSyncHandle> fileSyncHandles = new ArrayList<>();
+		Map<String, FileSyncHandle> handlesByBasePath = new HashMap<>();
 
 		// get the merge base commit from the merge based used by git merger
 		RevCommit mergeBase = VCSUtils.commitFromObjectId(git, merger.getBaseCommitId());
@@ -57,9 +69,10 @@ public class SyncTwoRefsWithMerge {
 		AbstractTreeIterator baseTreeParser = VCSUtils.prepareTreeParser(git, mergeBase);
 
 		List<DiffEntry> baseToLocalDiff = git.diff().setOldTree(baseTreeParser).setNewTree(localTreeParser).call();
-		List<DiffEntry> baseToRemoteDiff = git.diff().setOldTree(baseTreeParser).setNewTree(remoteTreeParser).call();
+		List<DiffEntry> baseToRemoteDiff = git.diff().setOldTree(VCSUtils.prepareTreeParser(git, mergeBase))
+				.setNewTree(remoteTreeParser).call();
 
-		List<String> unmergedPaths = merger.getUnmergedPaths(); // paths that got conflicted by git merge
+		Set<String> unmergedPaths = new HashSet<>(merger.getUnmergedPaths()); // paths that got conflicted by git merge
 
 		for (DiffEntry entry : baseToLocalDiff) {
 			String basePath = entry.getOldPath();
@@ -84,9 +97,12 @@ public class SyncTwoRefsWithMerge {
 			fileSyncHandle.setUnmerged(unmergedPaths.contains(basePath) || unmergedPaths.contains(localPath));
 			if (baseObject != null)
 				fileSyncHandle.setBaseBytes(baseObject.getBytes());
+			fileSyncHandle.setRemotePath(basePath);
+			fileSyncHandle.setRemoteBytes(fileSyncHandle.getBaseBytes());
 			if (localObject != null)
 				fileSyncHandle.setLocalBytes(localObject.getBytes());
 			fileSyncHandles.add(fileSyncHandle);
+			handlesByBasePath.putIfAbsent(basePath, fileSyncHandle);
 
 		}
 
@@ -108,26 +124,23 @@ public class SyncTwoRefsWithMerge {
 				basePath = remotePath;
 			}
 
-			FileSyncHandle fileSyncHandle = null;
 			// try to find existing handle
-			for (FileSyncHandle existing : fileSyncHandles) {
-				if (existing.getBasePath().equals(basePath)) {
-					fileSyncHandle = existing;
-					break;
-				}
-			}
+			FileSyncHandle fileSyncHandle = handlesByBasePath.get(basePath);
 			// if we fail to find a handle, make a new one
 			if (fileSyncHandle == null) {
 				fileSyncHandle = new FileSyncHandle(basePath);
 				if (baseObject != null)
 					fileSyncHandle.setBaseBytes(baseObject.getBytes());
+				fileSyncHandle.setLocalPath(basePath);
+				fileSyncHandle.setLocalBytes(fileSyncHandle.getBaseBytes());
 				fileSyncHandles.add(fileSyncHandle);
-			} else if (!fileSyncHandle.isUnmerged()) { // if not marked as unmerged yet, we might need to do it at this point
+				handlesByBasePath.put(basePath, fileSyncHandle);
+			}
+			if (!fileSyncHandle.isUnmerged()) { // if not marked as unmerged yet, we might need to do it at this point
 				fileSyncHandle.setUnmerged(unmergedPaths.contains(basePath) || unmergedPaths.contains(remotePath));
 			}
 
-			if (remoteObject != null)
-				fileSyncHandle.setRemoteBytes(remoteObject.getBytes());
+			fileSyncHandle.setRemoteBytes(remoteObject != null ? remoteObject.getBytes() : null);
 			fileSyncHandle.setRemotePath(remotePath);
 		}
 
