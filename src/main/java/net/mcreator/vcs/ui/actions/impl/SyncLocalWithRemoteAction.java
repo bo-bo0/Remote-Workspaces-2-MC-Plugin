@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -92,8 +93,10 @@ public class SyncLocalWithRemoteAction extends VCSAction {
 						// first commit our changes
 						CommitCommand commitCommand = git.commit().setAll(true).setMessage(commitMessage);
 						try {
-							commitCommand = commitCommand.setCommitter(workspaceVCS.getInfo().getUsername(),
-									new PersonIdent(git.getRepository()).getEmailAddress());
+							String username = workspaceVCS.getInfo().getUsername();
+							if (username != null && !username.isBlank())
+								commitCommand = commitCommand.setCommitter(username,
+										new PersonIdent(git.getRepository()).getEmailAddress());
 						} catch (Exception ignored) {
 						}
 						commitCommand.call();

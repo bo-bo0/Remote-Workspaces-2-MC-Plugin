@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,16 +24,21 @@ import com.google.gson.Gson;
 import net.mcreator.io.FileIO;
 import net.mcreator.io.PasswordVault;
 import net.mcreator.ui.init.L10N;
+import net.mcreator.vcs.util.DialogProgressMonitor;
+import net.mcreator.vcs.util.SshCredentialsProvider;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.LsRemoteCommand;
+import org.eclipse.jgit.transport.CredentialsProvider;
+import org.eclipse.jgit.transport.URIish;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 
 import javax.annotation.Nonnull;
 import javax.swing.*;
 import java.awt.*;
 import java.io.File;
+import java.net.URISyntaxException;
 import java.util.UUID;
 
 @SuppressWarnings("FieldMayBeFinal") public class VCSInfo {
@@ -100,16 +106,46 @@ import java.util.UUID;
 	}
 
 	public boolean isValid() throws Exception {
+		return isValid(null);
+	}
+
+	public boolean isSsh() {
+		return isSsh(remote);
+	}
+
+	public static boolean isSsh(String remote) {
+		if (remote == null || remote.isBlank())
+			return false;
+		try {
+			URIish uri = new URIish(remote);
+			return "ssh".equalsIgnoreCase(uri.getScheme())
+					|| uri.getScheme() == null && uri.getHost() != null;
+		} catch (URISyntaxException ex) {
+			return false;
+		}
+	}
+
+	public CredentialsProvider getCredentialsProvider(File workspaceFolder, Window parent) {
+		return isSsh() ? new SshCredentialsProvider(parent)
+				: new UsernamePasswordCredentialsProvider(username, getPassword(workspaceFolder, parent));
+	}
+
+	public boolean isValid(Window parent) throws Exception {
 		LsRemoteCommand cloneCommand = Git.lsRemoteRepository();
 		cloneCommand.setRemote(getRemote());
-		cloneCommand.setCredentialsProvider(new UsernamePasswordCredentialsProvider(getUsername(), password));
-		try {
-			cloneCommand.call();
-		} catch (Exception e) {
-			LOG.warn("VCS info check failed.", e);
-			throw e;
-		}
-		return true;
+		cloneCommand.setCredentialsProvider(isSsh() ? new SshCredentialsProvider(parent)
+				: new UsernamePasswordCredentialsProvider(getUsername(), password));
+		DialogProgressMonitor monitor = new DialogProgressMonitor(parent,
+				L10N.t("dialog.vcs.setup_remote_workspace_details"));
+		return DialogProgressMonitor.runTask(monitor, "VCSInfo-Validate", () -> {
+			try {
+				cloneCommand.call();
+			} catch (Exception e) {
+				LOG.warn("VCS info check failed.", e);
+				throw e;
+			}
+			return true;
+		});
 	}
 
 	public static void saveToFile(@Nonnull VCSInfo vcsInfo, File file) {
@@ -118,7 +154,7 @@ import java.util.UUID;
 				vcsInfo.password = null; // we don't save password in such case
 
 			// store password in vault if not already
-			if (vcsInfo.password != null) {
+			if (vcsInfo.password != null && !vcsInfo.isSsh()) {
 				PasswordVault.INSTANCE.addPassword(vcsInfo.vault_id, vcsInfo.password);
 			}
 
@@ -133,7 +169,8 @@ import java.util.UUID;
 			VCSInfo retval = new Gson().fromJson(FileIO.readFileToString(file), VCSInfo.class);
 
 			// load password from vault when loaded by GSON
-			retval.password = PasswordVault.INSTANCE.getPassword(retval.vault_id);
+			if (!retval.isSsh())
+				retval.password = PasswordVault.INSTANCE.getPassword(retval.vault_id);
 
 			return retval;
 		} catch (Exception e) {

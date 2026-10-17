@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -42,6 +43,8 @@ import org.eclipse.jgit.lib.SignatureVerifierFactory;
 import org.eclipse.jgit.lib.SignatureVerifiers;
 import org.eclipse.jgit.lib.SignerFactory;
 import org.eclipse.jgit.lib.Signers;
+import org.eclipse.jgit.transport.SshSessionFactory;
+import org.eclipse.jgit.transport.sshd.SshdSessionFactory;
 
 import javax.swing.*;
 import java.awt.*;
@@ -55,6 +58,7 @@ import java.util.ServiceLoader;
 	public Launcher(Plugin plugin) {
 		super(plugin);
 
+		SshSessionFactory.setInstance(new SshdSessionFactory());
 		ServiceLoader.load(SignerFactory.class, getClass().getClassLoader())
 				.forEach(factory -> Signers.set(factory.getType(), factory.create()));
 		ServiceLoader.load(SignatureVerifierFactory.class, getClass().getClassLoader())

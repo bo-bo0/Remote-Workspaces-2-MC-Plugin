@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,6 +23,7 @@ package net.mcreator.vcs.workspace;
 import net.mcreator.io.FileIO;
 import net.mcreator.plugin.PluginLoader;
 import net.mcreator.ui.init.L10N;
+import net.mcreator.vcs.util.DialogProgressMonitor;
 import net.mcreator.workspace.Workspace;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -33,13 +35,10 @@ import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.StoredConfig;
 import org.eclipse.jgit.transport.CredentialsProvider;
 import org.eclipse.jgit.transport.URIish;
-import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 
 import javax.swing.*;
 import java.awt.*;
 import java.io.File;
-import java.io.IOException;
-import java.net.URISyntaxException;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -76,12 +75,24 @@ public class WorkspaceVCS {
 	}
 
 	public CredentialsProvider getCredentialsProvider(File workspaceFolder, Window parent) {
-		return new UsernamePasswordCredentialsProvider(info.getUsername(), info.getPassword(workspaceFolder, parent));
+		return info.getCredentialsProvider(workspaceFolder, parent);
 	}
 
 	public static boolean initNewVCSWorkspace(Workspace workspace, VCSInfo vcsInfo, Window parent) {
 		Git git = null;
 		try {
+			CredentialsProvider credentials = vcsInfo.getCredentialsProvider(workspace.getWorkspaceFolder(), parent);
+			DialogProgressMonitor monitor = new DialogProgressMonitor(parent,
+					L10N.t("dialog.vcs.setup_remote_workspace_details"));
+			// try to fetch, reject this workspace if there is existing content in it
+			if (!DialogProgressMonitor.runTask(monitor, "WorkspaceVCS-ValidateRemote",
+					() -> Git.lsRemoteRepository().setRemote(vcsInfo.getRemote())
+							.setCredentialsProvider(credentials).call()).isEmpty()) {
+				JOptionPane.showMessageDialog(parent, L10N.t("dialog.vcs.setup.workspace_folder_not_empty.message"),
+						L10N.t("dialog.vcs.setup.workspace_folder_not_empty.title"), JOptionPane.ERROR_MESSAGE);
+				return false;
+			}
+
 			git = Git.init().setDirectory(workspace.getWorkspaceFolder()).call();
 
 			// add remote first
@@ -97,22 +108,13 @@ public class WorkspaceVCS {
 			config.setString(ConfigConstants.CONFIG_BRANCH_SECTION, "master", ConfigConstants.CONFIG_KEY_MERGE,
 					Constants.R_HEADS + "master");
 			config.save();
+			git.close();
 
-			// try to fetch, reject this workspace if there is existing content in it
-			git.fetch().setRemote("origin").setCredentialsProvider(
-					new UsernamePasswordCredentialsProvider(vcsInfo.getUsername(), vcsInfo.getPasswordDirect())).call();
-			if (git.getRepository().findRef(Constants.FETCH_HEAD) != null) {
-				if (git.getRepository().findRef(Constants.FETCH_HEAD).getObjectId() != null) {
-					closeVCS(git);
-					JOptionPane.showMessageDialog(parent, L10N.t("dialog.vcs.setup.workspace_folder_not_empty.message"),
-							L10N.t("dialog.vcs.setup.workspace_folder_not_empty.title"), JOptionPane.ERROR_MESSAGE);
-					return false;
-				}
-			}
-		} catch (GitAPIException | IOException | URISyntaxException e) {
+		} catch (Exception e) {
 			if (git != null)
-				closeVCS(git);
+				git.close();
 			LOG.error("Failed to init GIT repository", e);
+			return false;
 		}
 
 		// create gitignore

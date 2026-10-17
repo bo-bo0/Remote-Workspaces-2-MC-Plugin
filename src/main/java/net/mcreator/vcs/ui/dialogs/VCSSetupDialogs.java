@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -54,6 +55,8 @@ public class VCSSetupDialogs {
 		JCheckBox savePassword = L10N.checkbox("dialog.vcs.setup_save_password");
 		JButton newToken = L10N.button("dialog.vcs.setup_git_access_token.create");
 		JLabel pwLabel = L10N.label("dialog.vcs.setup_git_password");
+		JLabel authenticationHelp = ComponentUtils.setForeground(L10N.label("dialog.vcs.setup_store_password"),
+				Theme.current().getAltForegroundColor());
 
 		AtomicBoolean validUri = new AtomicBoolean(false);
 		try {
@@ -75,7 +78,14 @@ public class VCSSetupDialogs {
 			}
 
 			@Override public void changedUpdate(DocumentEvent e) {
-				boolean githubRepo = GITHUB_URL.matcher(remote.getText()).find();
+				boolean ssh = VCSInfo.isSsh(remote.getText());
+				boolean githubRepo = !ssh && GITHUB_URL.matcher(remote.getText()).find();
+				username.setEnabled(!ssh);
+				password.setEnabled(!ssh);
+				pwLabel.setEnabled(!ssh);
+				savePassword.setEnabled(!ssh);
+				authenticationHelp.setText(L10N.t(ssh ? "dialog.vcs.setup_ssh.message"
+						: "dialog.vcs.setup_store_password"));
 				pwLabel.setText(githubRepo ?
 						L10N.t("dialog.vcs.setup_git_access_token") :
 						L10N.t("dialog.vcs.setup_git_password"));
@@ -103,8 +113,7 @@ public class VCSSetupDialogs {
 
 		main.add("Center", form);
 
-		main.add("South", ComponentUtils.setForeground(L10N.label("dialog.vcs.setup_store_password"),
-				Theme.current().getAltForegroundColor()));
+		main.add("South", authenticationHelp);
 
 		main.add("North", new JLabel(text));
 
@@ -114,12 +123,14 @@ public class VCSSetupDialogs {
 				L10N.t("dialog.vcs.setup_proceed"));
 
 		if (option == 0) {
-			VCSInfo info = new VCSInfo(enableRemote ? remote.getText() : r, username.getText(),
-					new String(password.getPassword()), !savePassword.isSelected());
+			String remoteUrl = enableRemote ? remote.getText() : r;
+			boolean ssh = VCSInfo.isSsh(remoteUrl);
+			VCSInfo info = new VCSInfo(remoteUrl, username.getText(),
+					ssh ? null : new String(password.getPassword()), ssh || !savePassword.isSelected());
 			parent.setCursor(new Cursor(Cursor.WAIT_CURSOR));
 			boolean valid;
 			try {
-				valid = info.isValid();
+				valid = info.isValid(parent);
 			} catch (Exception e) {
 				if (e instanceof TransportException && e.getMessage().contains("not authorized")) {
 					JOptionPane.showMessageDialog(parent, L10N.t("dialog.vcs.setup_incorrect_username_password"),
