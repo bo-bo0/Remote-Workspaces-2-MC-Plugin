@@ -1,6 +1,7 @@
 /*
  * MCreator VCS plugin
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,6 +23,7 @@ import net.mcreator.Launcher;
 import net.mcreator.element.GeneratableElement;
 import net.mcreator.generator.Generator;
 import net.mcreator.generator.GeneratorTemplate;
+import net.mcreator.generator.template.TemplateGeneratorException;
 import net.mcreator.io.FileIO;
 import net.mcreator.ui.MCreator;
 import net.mcreator.util.MCreatorVersionNumber;
@@ -62,11 +64,15 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 	@Override
 	public boolean handleSync(Git git, boolean hasMergeConflicts, List<FileSyncHandle> handles, boolean dryRun)
 			throws GitAPIException, IOException {
+		return handleSync(git, mcreator.getWorkspace(), handles, dryRun);
+	}
+
+	boolean handleSync(Git git, Workspace localWorkspace, List<FileSyncHandle> handles, boolean dryRun)
+			throws GitAPIException, IOException {
 		boolean required_user_action;
 
 		List<FileSyncHandle> unprocessedHandles = new ArrayList<>(handles);
 
-		Workspace localWorkspace = mcreator.getWorkspace();
 		Workspace remoteWorkspace = null;
 		Workspace baseWorkspace = null;
 
@@ -502,15 +508,12 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 		List<GeneratorTemplate> modBaseTemplates = localWorkspace.getGenerator().getModBaseGeneratorTemplatesList();
 		for (GeneratorTemplate generatorTemplate : modBaseTemplates) {
 			for (FileSyncHandle handle : handles) {
-				if (isVCSPathThisFile(localWorkspace, handle.getBasePath(), generatorTemplate.getFile())) {
+				if (isVCSPathThisFile(localWorkspace, handle.getBasePath(), generatorTemplate.getFile())
+						&& generatorTemplate.toGeneratorFile("").getUsercodeComment() == null) {
 					unprocessedHandles.remove(handle);
-					if (!dryRun)
-						generatorTemplate.getFile().delete();
 				}
 			}
 		}
-		if (!dryRun)
-			localWorkspace.getGenerator().generateBase(); // regenerate mod base for state after merge
 
 		// mark all handles that do not have conflicts as merged at this point
 		// as now we only need to process remaining unmerged paths
@@ -531,6 +534,14 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 			for (MergeHandle<FileSyncHandle> unmergedPath : unmergedPaths) {
 				FileSyncHandle fileSyncHandle = unmergedPath.getLocal();
 				mergeNormalFile(localWorkspace, fileSyncHandle, unmergedPath);
+			}
+		}
+
+		if (!dryRun) {
+			try {
+				localWorkspace.getGenerator().generateBase(true); // regenerate mod base for state after merge
+			} catch (TemplateGeneratorException ex) {
+				throw new IOException(ex);
 			}
 		}
 
