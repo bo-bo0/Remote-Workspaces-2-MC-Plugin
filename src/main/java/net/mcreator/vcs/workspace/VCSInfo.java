@@ -30,6 +30,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.LsRemoteCommand;
+import org.eclipse.jgit.lib.PersonIdent;
 import org.eclipse.jgit.transport.CredentialsProvider;
 import org.eclipse.jgit.transport.URIish;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
@@ -46,6 +47,7 @@ import java.util.UUID;
 	private static final Logger LOG = LogManager.getLogger("VCS Info");
 
 	private String remote, username;
+	private String commitName, commitEmail;
 
 	private UUID vault_id;
 
@@ -67,6 +69,24 @@ import java.util.UUID;
 
 	public String getUsername() {
 		return username;
+	}
+
+	public String getCommitName() {
+		return commitName != null && !commitName.isBlank() ? commitName
+				: username != null && !username.isBlank() ? username : "MCreator";
+	}
+
+	public String getCommitEmail() {
+		return commitEmail != null && !commitEmail.isBlank() ? commitEmail : "mcreator@localhost";
+	}
+
+	public void setCommitIdentity(String name, String email) {
+		this.commitName = name.isBlank() ? "MCreator" : name.strip();
+		this.commitEmail = email.isBlank() ? "mcreator@localhost" : email.strip();
+	}
+
+	public PersonIdent getCommitIdentity() {
+		return new PersonIdent(getCommitName(), getCommitEmail());
 	}
 
 	public String getPasswordDirect() {

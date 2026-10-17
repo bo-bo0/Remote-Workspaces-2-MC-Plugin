@@ -47,10 +47,18 @@ public class VCSSetupDialogs {
 
 	public static VCSInfo getVCSInfoDialog(Window parent, String text, String r, String u, boolean p,
 			boolean enableRemote) {
+		return getVCSInfoDialog(parent, text, r, u, p, enableRemote,
+				u != null && !u.isBlank() ? u : "MCreator", "mcreator@localhost");
+	}
+
+	public static VCSInfo getVCSInfoDialog(Window parent, String text, String r, String u, boolean p,
+			boolean enableRemote, String name, String email) {
 		JPanel main = new JPanel(new BorderLayout(0, 10));
 
 		JTextField remote = new JTextField(34);
 		JTextField username = new JTextField(25);
+		JTextField commitName = new JTextField(name, 25);
+		JTextField commitEmail = new JTextField(email, 25);
 		JPasswordField password = new JPasswordField(25);
 		JCheckBox savePassword = L10N.checkbox("dialog.vcs.setup_save_password");
 		JButton newToken = L10N.button("dialog.vcs.setup_git_access_token.create");
@@ -110,10 +118,16 @@ public class VCSSetupDialogs {
 		form.add(PanelUtils.westAndEastElement(pwLabel, password, 5, 0));
 		form.add(PanelUtils.westAndEastElement(newToken, Box.createHorizontalGlue(), 5, 0));
 		form.add(savePassword);
+		form.add(PanelUtils.westAndEastElement(L10N.label("dialog.vcs.commit_name"), commitName, 5, 0));
+		form.add(PanelUtils.westAndEastElement(L10N.label("dialog.vcs.commit_email"), commitEmail, 5, 0));
 
 		main.add("Center", form);
 
-		main.add("South", authenticationHelp);
+		JPanel help = new JPanel(new BorderLayout(0, 10));
+		help.add("North", authenticationHelp);
+		help.add("South", ComponentUtils.setForeground(L10N.label("dialog.vcs.commit_identity_help"),
+				Theme.current().getAltForegroundColor()));
+		main.add("South", help);
 
 		main.add("North", new JLabel(text));
 
@@ -127,6 +141,7 @@ public class VCSSetupDialogs {
 			boolean ssh = VCSInfo.isSsh(remoteUrl);
 			VCSInfo info = new VCSInfo(remoteUrl, username.getText(),
 					ssh ? null : new String(password.getPassword()), ssh || !savePassword.isSelected());
+			info.setCommitIdentity(commitName.getText(), commitEmail.getText());
 			parent.setCursor(new Cursor(Cursor.WAIT_CURSOR));
 			boolean valid;
 			try {
@@ -144,7 +159,7 @@ public class VCSSetupDialogs {
 				}
 				parent.setCursor(Cursor.getDefaultCursor());
 				return getVCSInfoDialog(parent, text, remote.getText(), username.getText(), !savePassword.isSelected(),
-						enableRemote);
+						enableRemote, commitName.getText(), commitEmail.getText());
 			}
 			parent.setCursor(Cursor.getDefaultCursor());
 			if (valid)

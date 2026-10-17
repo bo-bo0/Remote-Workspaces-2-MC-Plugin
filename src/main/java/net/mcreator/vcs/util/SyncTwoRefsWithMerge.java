@@ -155,7 +155,7 @@ public class SyncTwoRefsWithMerge {
 	}
 
 	public interface PreCustomMergeAction {
-		void call() throws GitAPIException;
+		void call() throws GitAPIException, IOException;
 	}
 
 	public record SyncResult(boolean requiredCustomMergeHandler, boolean requiredUserAction) {}

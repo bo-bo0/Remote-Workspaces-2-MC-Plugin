@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -38,7 +39,7 @@ public class VCSInfoSettingsAction extends VCSAction {
 			if (vcsInfo != null) {
 				newInfo = VCSSetupDialogs.getVCSInfoDialog(actionRegistry.getMCreator(),
 						L10N.t("dialog.vcs.settings.help.message"), vcsInfo.getRemote(), vcsInfo.getUsername(),
-						vcsInfo.isPromptForPassword(), false);
+						vcsInfo.isPromptForPassword(), false, vcsInfo.getCommitName(), vcsInfo.getCommitEmail());
 			} else {
 				newInfo = VCSSetupDialogs.getVCSInfoDialog(actionRegistry.getMCreator(),
 						L10N.t("dialog.vcs.settings.help.message"));

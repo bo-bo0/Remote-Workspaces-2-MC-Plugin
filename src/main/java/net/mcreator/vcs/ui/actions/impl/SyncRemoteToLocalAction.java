@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -39,6 +40,7 @@ import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.transport.CredentialsProvider;
+import org.eclipse.jgit.transport.FetchResult;
 
 import javax.swing.*;
 import java.awt.*;
@@ -69,13 +71,13 @@ public class SyncRemoteToLocalAction extends VCSAction {
 
 			try {
 				// first we fetch remote changes
-				DialogProgressMonitor.runTask(monitor, "SyncRemoteToLocal-Fetch",
+				FetchResult fetchResult = DialogProgressMonitor.runTask(monitor, "SyncRemoteToLocal-Fetch",
 						() -> git.fetch().setRemote("origin").setCredentialsProvider(credentialsProvider)
 								.setProgressMonitor(monitor).call());
 
 				// check if we fetched anything
-				if (git.getRepository().findRef(Constants.FETCH_HEAD) == null
-						|| git.getRepository().findRef(Constants.FETCH_HEAD).getObjectId() == null) {
+				ObjectId fetchHead = VCSCommits.remoteHead(git, fetchResult);
+				if (fetchHead == null) {
 					actionRegistry.getMCreator().getStatusBar().setPersistentMessage(
 							L10N.t("statusbar.vcs.pull.no_commits"));
 					actionRegistry.getMCreator().setCursor(Cursor.getDefaultCursor());
@@ -85,13 +87,12 @@ public class SyncRemoteToLocalAction extends VCSAction {
 				// stash local changes
 				git.rm().addFilepattern(".").call();
 				git.add().addFilepattern(".").call();
-				stash = git.stashCreate().setIncludeUntracked(true).call();
+				stash = git.stashCreate().setPerson(workspaceVCS.getInfo().getCommitIdentity())
+						.setIncludeUntracked(true).call();
 
 				ObjectId presyncPointer = stash;
 				if (presyncPointer == null) // if there are no changes, stash is null
 					presyncPointer = git.getRepository().resolve(Constants.HEAD);
-
-				ObjectId fetchHead = git.getRepository().findRef(Constants.FETCH_HEAD).getObjectId();
 
 				// next we do a dry run of the merge to see if we can silently merge workspaces
 				SyncTwoRefsWithMerge.SyncResult syncResult = SyncTwoRefsWithMerge.sync(git, presyncPointer, fetchHead,
@@ -104,9 +105,10 @@ public class SyncRemoteToLocalAction extends VCSAction {
 							WorkspaceSettings.class);
 
 					// pull changes from remote before unstashing
-					DialogProgressMonitor.runTask(monitor, "SyncRemoteToLocal",
-							() -> git.pull().setRemote("origin").setCredentialsProvider(credentialsProvider)
-									.setProgressMonitor(monitor).call());
+					DialogProgressMonitor.runTask(monitor, "SyncRemoteToLocal", () -> {
+						VCSCommits.mergeRemote(git, fetchHead, workspaceVCS.getInfo(), monitor);
+						return null;
+					});
 
 					// unstash local changes
 					if (stash != null)

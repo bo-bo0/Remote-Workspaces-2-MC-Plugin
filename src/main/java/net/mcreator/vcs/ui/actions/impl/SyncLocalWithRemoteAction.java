@@ -36,7 +36,6 @@ import net.mcreator.workspace.settings.WorkspaceSettings;
 import net.mcreator.workspace.settings.WorkspaceSettingsChange;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.eclipse.jgit.api.CommitCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.PushCommand;
 import org.eclipse.jgit.api.Status;
@@ -44,6 +43,7 @@ import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.lib.*;
 import org.eclipse.jgit.merge.MergeMessageFormatter;
 import org.eclipse.jgit.transport.CredentialsProvider;
+import org.eclipse.jgit.transport.FetchResult;
 
 import javax.swing.*;
 import java.awt.*;
@@ -91,23 +91,15 @@ public class SyncLocalWithRemoteAction extends VCSAction {
 				if (commitMessage != null) {
 					try {
 						// first commit our changes
-						CommitCommand commitCommand = git.commit().setAll(true).setMessage(commitMessage);
-						try {
-							String username = workspaceVCS.getInfo().getUsername();
-							if (username != null && !username.isBlank())
-								commitCommand = commitCommand.setCommitter(username,
-										new PersonIdent(git.getRepository()).getEmailAddress());
-						} catch (Exception ignored) {
-						}
-						commitCommand.call();
+						VCSCommits.commit(git, workspaceVCS.getInfo()).setAll(true).setMessage(commitMessage).call();
 
 						// next we check if there are any commits on the remote
-						DialogProgressMonitor.runTask(monitor, "SyncLocalWithRemote-Fetch",
+						FetchResult fetchResult = DialogProgressMonitor.runTask(monitor, "SyncLocalWithRemote-Fetch",
 								() -> git.fetch().setRemote("origin").setCredentialsProvider(credentialsProvider)
 										.setProgressMonitor(monitor).call());
-						if (git.getRepository().findRef(Constants.FETCH_HEAD) != null) {
+						ObjectId fetchHead = VCSCommits.remoteHead(git, fetchResult);
+						if (fetchHead != null) {
 							ObjectId head = git.getRepository().resolve(Constants.HEAD);
-							ObjectId fetchHead = git.getRepository().findRef(Constants.FETCH_HEAD).getObjectId();
 
 							String mergeMessage = new MergeMessageFormatter().format(Collections.singletonList(
 											new ObjectIdRef.Unpeeled(Ref.Storage.LOOSE, fetchHead.getName(), fetchHead.copy())),
@@ -126,12 +118,12 @@ public class SyncLocalWithRemoteAction extends VCSAction {
 												== RepositoryState.MERGING_RESOLVED) {
 											git.rm().addFilepattern(".").call();
 											git.add().addFilepattern(".").call();
-											git.commit().setAll(true).setMessage(mergeMessage).call();
+											VCSCommits.commit(git, workspaceVCS.getInfo()).setAll(true)
+													.setMessage(mergeMessage).call();
 										}
 
 										// we pull changes before custom merge handler tasks
-										git.pull().setRemote("origin").setCredentialsProvider(credentialsProvider)
-												.setProgressMonitor(monitor).call();
+										VCSCommits.mergeRemote(git, fetchHead, workspaceVCS.getInfo(), monitor);
 									}, false).requiredCustomMergeHandler());
 
 							// possible refactor after sync start
@@ -159,7 +151,7 @@ public class SyncLocalWithRemoteAction extends VCSAction {
 							try {
 								git.rm().addFilepattern(".").call();
 								git.add().addFilepattern(".").call();
-								git.commit().setAll(true).setAllowEmpty(false)
+								VCSCommits.commit(git, workspaceVCS.getInfo()).setAll(true).setAllowEmpty(false)
 										.setMessage("MCreator " + mergeMessage).call();
 							} catch (Exception ignored) {
 							}

@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -32,6 +33,7 @@ import net.mcreator.vcs.ui.actions.VCSActionRegistry;
 import net.mcreator.vcs.ui.actions.impl.SetupVCSAction;
 import net.mcreator.vcs.ui.component.BranchesPopup;
 import net.mcreator.vcs.util.DialogProgressMonitor;
+import net.mcreator.vcs.util.VCSCommits;
 import net.mcreator.vcs.workspace.WorkspaceVCS;
 import net.mcreator.workspace.TerribleWorkspaceHacks;
 import org.apache.logging.log4j.LogManager;
@@ -264,7 +266,7 @@ public class WorkspacePanelVCS extends AbstractWorkspacePanel {
 							git.add().addFilepattern(".").call();
 
 							// remove local changes attempt 1
-							git.stashCreate().call();
+							git.stashCreate().setPerson(workspaceVCS.getInfo().getCommitIdentity()).call();
 							git.stashDrop().call();
 							pu.markStateOk();
 
@@ -278,13 +280,14 @@ public class WorkspacePanelVCS extends AbstractWorkspacePanel {
 							git.checkout().setName("tmpHistoryBranch" + commit.getName()).setCreateBranch(true).call();
 							pu.setPercent(33);
 							String branchName = git.getRepository().getFullBranch();
-							git.merge().setStrategy(MergeStrategy.OURS).include(currentBranchHead)
+							VCSCommits.merge(git, git.merge().setStrategy(MergeStrategy.OURS).include(currentBranchHead)
 									.setFastForward(MergeCommand.FastForwardMode.NO_FF)
-									.setMessage("Jump back to commit " + commit.getName()).call();
+									.setMessage("Jump back to commit " + commit.getName()), workspaceVCS.getInfo());
 							pu.setPercent(50);
 							git.checkout().setName(oldBranch).call();
 							pu.setPercent(67);
-							git.merge().include(git.getRepository().resolve(branchName)).call();
+							VCSCommits.merge(git, git.merge().include(git.getRepository().resolve(branchName)),
+									workspaceVCS.getInfo());
 							pu.setPercent(83);
 							git.branchDelete().setBranchNames(branchName).call();
 							pu.markStateOk();
@@ -295,7 +298,8 @@ public class WorkspacePanelVCS extends AbstractWorkspacePanel {
 										L10N.t("workspace.vcs.jump_to_selected_commit.cleaning")));
 								git.rm().addFilepattern(".").call();
 								git.add().addFilepattern(".").call();
-								git.commit().setAll(true).setAllowEmpty(false).setMessage("Jump cleanup commit").call();
+								VCSCommits.commit(git, workspaceVCS.getInfo()).setAll(true).setAllowEmpty(false)
+										.setMessage("Jump cleanup commit").call();
 								pu.markStateOk();
 							} catch (Exception ignored) {
 							}
