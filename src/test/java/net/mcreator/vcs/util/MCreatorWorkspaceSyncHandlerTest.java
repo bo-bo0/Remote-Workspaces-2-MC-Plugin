@@ -49,6 +49,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -64,6 +65,39 @@ class MCreatorWorkspaceSyncHandlerTest extends SwingTestSupport {
 
 	@BeforeAll static void initializePreferences() {
 		PreferencesManager.PREFERENCES = new PreferencesData();
+	}
+
+	@ParameterizedTest
+	@ValueSource(booleans = { false, true })
+	void virtualWorkspaceWatchersAreClosedAfterSuccessAndFailure(boolean fail) throws Exception {
+		try (Git git = createRepository(); TestWorkspace workspace = new TestWorkspace(repository, MODS_PATH, "#")) {
+			Set<Thread> before = Thread.getAllStackTraces().keySet();
+			for (int i = 0; i < 4; i++) {
+				FileSyncHandle handle = new FileSyncHandle("test.mcreator");
+				handle.setLocalPath("test.mcreator");
+				handle.setRemotePath("test.mcreator");
+				String json = WorkspaceFileManager.gson.toJson(workspace, Workspace.class);
+				if (fail)
+					json = json.replace("\"children\": []", "\"children\": null")
+							.replace("\"children\":[]", "\"children\":null");
+				handle.setRemoteBytes(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+				if (fail)
+					assertThrows(NullPointerException.class, () -> new MCreatorWorkspaceSyncHandler(null)
+							.handleSync(git, workspace, List.of(handle), true));
+				else
+					assertFalse(new MCreatorWorkspaceSyncHandler(null).handleSync(git, workspace, List.of(handle), true));
+			}
+			for (Thread thread : Thread.getAllStackTraces().keySet()) {
+				if (!before.contains(thread) && thread.getName().equals("File Watcher Thread")) {
+					thread.join(1000);
+					assertFalse(thread.isAlive(), "Virtual workspace watcher must terminate");
+				}
+			}
+			Field closed = net.mcreator.io.FileWatcher.class.getDeclaredField("closed");
+			closed.setAccessible(true);
+			assertFalse(closed.getBoolean(workspace.getGenerator().getFileWatcher()));
+			assertEquals(0, workspace.testGenerator.regenerations);
+		}
 	}
 
 	@ParameterizedTest

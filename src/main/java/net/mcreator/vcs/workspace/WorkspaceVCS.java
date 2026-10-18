@@ -39,24 +39,28 @@ import org.eclipse.jgit.transport.URIish;
 import javax.swing.*;
 import java.awt.*;
 import java.io.File;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class WorkspaceVCS {
 
 	private static final Logger LOG = LogManager.getLogger("Workspace VCS");
-	private static final Map<File, WorkspaceVCS> workspaces = new HashMap<>();
+	private static final Map<File, WorkspaceVCS> workspaces = new ConcurrentHashMap<>();
+	private final Workspace workspace;
 
 	private VCSInfo info;
 
 	private Git git;
 
 	private WorkspaceVCS(Workspace workspace, VCSInfo info) {
+		this.workspace = workspace;
 		this.info = info;
 
 		try {
 			this.git = Git.init().setDirectory(workspace.getWorkspaceFolder()).call();
-			workspaces.put(workspace.getWorkspaceFolder(), this);
+			WorkspaceVCS previous = workspaces.put(workspace.getWorkspaceFolder(), this);
+			if (previous != null)
+				previous.git.close();
 		} catch (GitAPIException e) {
 			LOG.error("Failed to load repository", e);
 		}
@@ -147,6 +151,13 @@ public class WorkspaceVCS {
 	public static void removeVCSWorkspace(Workspace workspace) {
 		new File(workspace.getFolderManager().getWorkspaceCacheDir(), "vcsInfo").delete();
 		closeVCS(workspaces.remove(workspace.getWorkspaceFolder()).git);
+	}
+
+	public static void releaseVCSWorkspace(Workspace workspace) {
+		WorkspaceVCS current = workspaces.get(workspace.getWorkspaceFolder());
+		if (current != null && current.workspace == workspace
+				&& workspaces.remove(workspace.getWorkspaceFolder(), current))
+			current.git.close();
 	}
 
 	private static boolean isVCSInitialized(Workspace workspace) {

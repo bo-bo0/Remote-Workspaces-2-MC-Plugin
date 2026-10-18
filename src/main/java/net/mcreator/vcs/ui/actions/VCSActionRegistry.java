@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,12 +25,13 @@ import net.mcreator.ui.action.BasicAction;
 import net.mcreator.vcs.ui.actions.impl.*;
 
 import java.io.File;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class VCSActionRegistry {
 
-	private static final Map<File, VCSActionRegistry> vcsActions = new HashMap<>();
+	private static final Map<File, VCSActionRegistry> vcsActions = new ConcurrentHashMap<>();
+	private final MCreator mcreator;
 
 	public final BasicAction setupVCS;
 	public final BasicAction unlinkVCS;
@@ -41,7 +43,7 @@ public class VCSActionRegistry {
 	public final BasicAction remoteWorkspaceSettings;
 
 	public VCSActionRegistry(MCreator mcreator) {
-		vcsActions.put(mcreator.getWorkspaceFolder(), this);
+		this.mcreator = mcreator;
 
 		this.setupVCS = new SetupVCSAction(mcreator.getActionRegistry());
 		this.unlinkVCS = new UnlinkVCSAction(mcreator.getActionRegistry());
@@ -51,10 +53,16 @@ public class VCSActionRegistry {
 		this.showUnsyncedChanges = new ShowLocalChangesAction(mcreator.getActionRegistry());
 		this.rollbackUnsyncedChanges = new RollbackLocalChangesAction(mcreator.getActionRegistry());
 		this.remoteWorkspaceSettings = new VCSInfoSettingsAction(mcreator.getActionRegistry());
+		vcsActions.put(mcreator.getWorkspaceFolder(), this);
 	}
 
 	public static VCSActionRegistry get(MCreator mcreator) {
 		return vcsActions.get(mcreator.getWorkspaceFolder());
+	}
+
+	public static void release(MCreator mcreator) {
+		vcsActions.computeIfPresent(mcreator.getWorkspaceFolder(),
+				(folder, current) -> current.mcreator == mcreator ? null : current);
 	}
 
 }

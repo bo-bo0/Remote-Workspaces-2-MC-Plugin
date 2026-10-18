@@ -48,6 +48,8 @@ import org.eclipse.jgit.transport.sshd.SshdSessionFactory;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.io.File;
 import java.util.ServiceLoader;
 
@@ -72,6 +74,12 @@ import java.util.ServiceLoader;
 		}));
 		addListener(MCreatorLoadedEvent.class, event -> {
 			MCreator mcreator = event.getMCreator();
+			mcreator.addWindowListener(new WindowAdapter() {
+				@Override public void windowClosed(WindowEvent event) {
+					WorkspaceVCS.releaseVCSWorkspace(mcreator.getWorkspace());
+					VCSActionRegistry.release(mcreator);
+				}
+			});
 			if (WorkspaceVCS.loadVCSWorkspace(mcreator.getWorkspace()))
 				LOG.info("Loaded VCS for current workspace");
 

@@ -69,6 +69,16 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 
 	boolean handleSync(Git git, Workspace localWorkspace, List<FileSyncHandle> handles, boolean dryRun)
 			throws GitAPIException, IOException {
+		List<Generator> virtualGenerators = new ArrayList<>();
+		try {
+			return handleSync(git, localWorkspace, handles, dryRun, virtualGenerators);
+		} finally {
+			virtualGenerators.forEach(Generator::close);
+		}
+	}
+
+	private boolean handleSync(Git git, Workspace localWorkspace, List<FileSyncHandle> handles, boolean dryRun,
+			List<Generator> virtualGenerators) throws GitAPIException, IOException {
 		boolean required_user_action;
 
 		List<FileSyncHandle> unprocessedHandles = new ArrayList<>(handles);
@@ -84,9 +94,9 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 				conflictsInWorkspaceFile =
 						handle.isUnmerged() && handle.getChangeTypeRelativeToRemote() != DiffEntry.ChangeType.DELETE;
 				if (conflictsInWorkspaceFile)
-					baseWorkspace = getVirtualWorkspace(localWorkspace, new String(handle.getBaseBytes()));
+					baseWorkspace = getVirtualWorkspace(localWorkspace, new String(handle.getBaseBytes()), virtualGenerators);
 				if (handle.getChangeTypeRelativeToRemote() != DiffEntry.ChangeType.DELETE)
-					remoteWorkspace = getVirtualWorkspace(localWorkspace, new String(handle.getRemoteBytes()));
+					remoteWorkspace = getVirtualWorkspace(localWorkspace, new String(handle.getRemoteBytes()), virtualGenerators);
 				else
 					remoteWorkspace = baseWorkspace;
 				unprocessedHandles.remove(handle);
@@ -554,13 +564,15 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 		return required_user_action;
 	}
 
-	private Workspace getVirtualWorkspace(Workspace original, String workspaceString) throws IOException {
+	private Workspace getVirtualWorkspace(Workspace original, String workspaceString, List<Generator> virtualGenerators)
+			throws IOException {
 		return new Workspace(null) {{
 			Workspace retval = WorkspaceFileManager.gson.fromJson(workspaceString, Workspace.class);
 			if (retval == null)
 				throw new IOException("Failed to parse workspace string");
 			TerribleWorkspaceHacks.loadStoredDataFrom(this, retval);
 			this.generator = new Generator(this);
+			virtualGenerators.add(this.generator);
 			this.generator.setGradleCache(this.generator.getGradleCache());
 			this.fileManager = original.getFileManager();
 			this.reloadModElements();
