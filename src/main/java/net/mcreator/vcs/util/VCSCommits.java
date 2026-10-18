@@ -25,17 +25,50 @@ import org.eclipse.jgit.api.MergeCommand;
 import org.eclipse.jgit.api.MergeResult;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.lib.BranchConfig;
+import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.ObjectIdRef;
 import org.eclipse.jgit.lib.PersonIdent;
 import org.eclipse.jgit.lib.ProgressMonitor;
 import org.eclipse.jgit.lib.Ref;
+import org.eclipse.jgit.lib.RepositoryState;
+import org.eclipse.jgit.merge.MergeMessageFormatter;
+import org.eclipse.jgit.transport.CredentialsProvider;
 import org.eclipse.jgit.transport.FetchResult;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.RemoteRefUpdate;
 
 import java.io.IOException;
+import java.util.Collections;
 
 public class VCSCommits {
+
+	public static RemoteSyncResult fetchAndMerge(Git git, VCSInfo info, CredentialsProvider credentials,
+			ProgressMonitor monitor, ICustomSyncHandler handler) throws GitAPIException, IOException {
+		// next we check if there are any commits on the remote
+		FetchResult fetch = git.fetch().setRemote("origin").setCredentialsProvider(credentials)
+				.setProgressMonitor(monitor).call();
+		ObjectId remote = remoteHead(git, fetch);
+		if (remote == null)
+			return null;
+		ObjectId head = git.getRepository().resolve(Constants.HEAD);
+		String mergeMessage = new MergeMessageFormatter().format(Collections.singletonList(
+				new ObjectIdRef.Unpeeled(Ref.Storage.LOOSE, remote.getName(), remote)),
+				new ObjectIdRef.Unpeeled(Ref.Storage.LOOSE, head.getName(), head));
+		SyncTwoRefsWithMerge.SyncResult result = SyncTwoRefsWithMerge.sync(git, head, remote, handler, () -> {
+			// fix in case if merge was not committed yet
+			if (git.getRepository().getRepositoryState() == RepositoryState.MERGING_RESOLVED) {
+				git.rm().addFilepattern(".").call();
+				git.add().addFilepattern(".").call();
+				commit(git, info).setAll(true).setMessage(mergeMessage).call();
+			}
+			// we pull changes before custom merge handler tasks
+			mergeRemote(git, remote, info, monitor);
+		}, false);
+		return new RemoteSyncResult(mergeMessage, result.requiredCustomMergeHandler());
+	}
+
+	public record RemoteSyncResult(String mergeMessage, boolean requiredCustomMergeHandler) {}
 
 	public static void checkPushResults(Iterable<PushResult> results) throws IOException {
 		boolean hasUpdates = false;

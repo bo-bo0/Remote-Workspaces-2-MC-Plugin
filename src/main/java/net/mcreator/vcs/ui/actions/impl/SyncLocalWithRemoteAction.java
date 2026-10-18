@@ -41,13 +41,10 @@ import org.eclipse.jgit.api.PushCommand;
 import org.eclipse.jgit.api.Status;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.lib.*;
-import org.eclipse.jgit.merge.MergeMessageFormatter;
 import org.eclipse.jgit.transport.CredentialsProvider;
-import org.eclipse.jgit.transport.FetchResult;
 
 import javax.swing.*;
 import java.awt.*;
-import java.util.Collections;
 
 public class SyncLocalWithRemoteAction extends VCSAction {
 
@@ -86,86 +83,63 @@ public class SyncLocalWithRemoteAction extends VCSAction {
 			}
 
 			// if we have changes, ask user to commit them before syncing
-			if (!status.getUncommittedChanges().isEmpty()) {
-				String commitMessage = VCSCommitDialog.getVCSCommitDialog(actionRegistry.getMCreator(), status);
-				if (commitMessage != null) {
+			try {
+				if (!status.getUncommittedChanges().isEmpty()) {
+					String commitMessage = VCSCommitDialog.getVCSCommitDialog(actionRegistry.getMCreator(), status);
+					if (commitMessage == null) {
+						actionRegistry.getMCreator().setCursor(Cursor.getDefaultCursor());
+						return;
+					}
+					// first commit our changes
+					VCSCommits.commit(git, workspaceVCS.getInfo()).setAll(true).setMessage(commitMessage).call();
+				}
+				Workspace localWorkspace = actionRegistry.getMCreator().getWorkspace();
+				WorkspaceSettings preMergeSettings = GSONClone.deepClone(localWorkspace.getWorkspaceSettings(),
+						WorkspaceSettings.class);
+				// if custom merge handler was required
+				VCSCommits.RemoteSyncResult syncResult = DialogProgressMonitor.runTask(monitor,
+						"SyncLocalWithRemote-ResolveConflict",
+						() -> VCSCommits.fetchAndMerge(git, workspaceVCS.getInfo(), credentialsProvider, monitor, mergeHandler));
+				if (syncResult != null) {
+					needsWorkspaceBuildAfter = syncResult.requiredCustomMergeHandler();
+					// possible refactor after sync start
+					TerribleWorkspaceHacks.reloadFromFS(actionRegistry.getMCreator().getWorkspace());
+					if (!localWorkspace.getWorkspaceSettings().getCurrentGenerator()
+							.equals(preMergeSettings.getCurrentGenerator())) {
+						LOG.debug("Switching local workspace generator to "
+								+ localWorkspace.getWorkspaceSettings().getCurrentGenerator());
+
+						WorkspaceGeneratorSetup.cleanupGeneratorForSwitchTo(localWorkspace,
+								Generator.GENERATOR_CACHE.get(
+										localWorkspace.getWorkspaceSettings().getCurrentGenerator()));
+						localWorkspace.switchGenerator(
+								localWorkspace.getWorkspaceSettings().getCurrentGenerator());
+						WorkspaceGeneratorSetupDialog.runSetup(actionRegistry.getMCreator(), false);
+					}
+					WorkspaceSettingsChange workspaceSettingsChange = new WorkspaceSettingsChange(
+							preMergeSettings, localWorkspace.getWorkspaceSettings());
+					if (workspaceSettingsChange.refactorNeeded())
+						WorkspaceSettingsAction.refactorWorkspace(actionRegistry.getMCreator(),
+								workspaceSettingsChange);
+					// possible refactor after sync end
+
+					// we might need to make another commit to commit the merge changes
 					try {
-						// first commit our changes
-						VCSCommits.commit(git, workspaceVCS.getInfo()).setAll(true).setMessage(commitMessage).call();
-
-						// next we check if there are any commits on the remote
-						FetchResult fetchResult = DialogProgressMonitor.runTask(monitor, "SyncLocalWithRemote-Fetch",
-								() -> git.fetch().setRemote("origin").setCredentialsProvider(credentialsProvider)
-										.setProgressMonitor(monitor).call());
-						ObjectId fetchHead = VCSCommits.remoteHead(git, fetchResult);
-						if (fetchHead != null) {
-							ObjectId head = git.getRepository().resolve(Constants.HEAD);
-
-							String mergeMessage = new MergeMessageFormatter().format(Collections.singletonList(
-											new ObjectIdRef.Unpeeled(Ref.Storage.LOOSE, fetchHead.getName(), fetchHead.copy())),
-									new ObjectIdRef.Unpeeled(Ref.Storage.LOOSE, head.getName(), head.copy()));
-
-							Workspace localWorkspace = actionRegistry.getMCreator().getWorkspace();
-							WorkspaceSettings preMergeSettings = GSONClone.deepClone(
-									localWorkspace.getWorkspaceSettings(), WorkspaceSettings.class);
-
-							// if custom merge handler was required
-							needsWorkspaceBuildAfter = DialogProgressMonitor.runTask(monitor,
-									"SyncLocalWithRemote-ResolveConflict",
-									() -> SyncTwoRefsWithMerge.sync(git, head, fetchHead, mergeHandler, () -> {
-										// fix in case if merge was not committed yet
-										if (git.getRepository().getRepositoryState()
-												== RepositoryState.MERGING_RESOLVED) {
-											git.rm().addFilepattern(".").call();
-											git.add().addFilepattern(".").call();
-											VCSCommits.commit(git, workspaceVCS.getInfo()).setAll(true)
-													.setMessage(mergeMessage).call();
-										}
-
-										// we pull changes before custom merge handler tasks
-										VCSCommits.mergeRemote(git, fetchHead, workspaceVCS.getInfo(), monitor);
-									}, false).requiredCustomMergeHandler());
-
-							// possible refactor after sync start
-							TerribleWorkspaceHacks.reloadFromFS(actionRegistry.getMCreator().getWorkspace());
-							if (!localWorkspace.getWorkspaceSettings().getCurrentGenerator()
-									.equals(preMergeSettings.getCurrentGenerator())) {
-								LOG.debug("Switching local workspace generator to "
-										+ localWorkspace.getWorkspaceSettings().getCurrentGenerator());
-
-								WorkspaceGeneratorSetup.cleanupGeneratorForSwitchTo(localWorkspace,
-										Generator.GENERATOR_CACHE.get(
-												localWorkspace.getWorkspaceSettings().getCurrentGenerator()));
-								localWorkspace.switchGenerator(
-										localWorkspace.getWorkspaceSettings().getCurrentGenerator());
-								WorkspaceGeneratorSetupDialog.runSetup(actionRegistry.getMCreator(), false);
-							}
-							WorkspaceSettingsChange workspaceSettingsChange = new WorkspaceSettingsChange(
-									preMergeSettings, localWorkspace.getWorkspaceSettings());
-							if (workspaceSettingsChange.refactorNeeded())
-								WorkspaceSettingsAction.refactorWorkspace(actionRegistry.getMCreator(),
-										workspaceSettingsChange);
-							// possible refactor after sync end
-
-							// we might need to make another commit to commit the merge changes
-							try {
-								git.rm().addFilepattern(".").call();
-								git.add().addFilepattern(".").call();
-								VCSCommits.commit(git, workspaceVCS.getInfo()).setAll(true).setAllowEmpty(false)
-										.setMessage("MCreator " + mergeMessage).call();
-							} catch (Exception ignored) {
-							}
-
-						}
-					} catch (Exception ex) {
-						JOptionPane.showMessageDialog(actionRegistry.getMCreator(),
-								L10N.t("dialog.vcs.sync_with_remote_workspace.general_fail.message", ex.getMessage()),
-								L10N.t("dialog.vcs.sync_with_remote_workspace.general_fail.title"),
-								JOptionPane.ERROR_MESSAGE);
-						LOG.error("Failed to pull from remote!", ex);
+						git.rm().addFilepattern(".").call();
+						git.add().addFilepattern(".").call();
+						VCSCommits.commit(git, workspaceVCS.getInfo()).setAll(true).setAllowEmpty(false)
+								.setMessage("MCreator " + syncResult.mergeMessage()).call();
+					} catch (Exception ignored) {
 					}
 
 				}
+			} catch (Exception ex) {
+				JOptionPane.showMessageDialog(actionRegistry.getMCreator(),
+						L10N.t("dialog.vcs.sync_with_remote_workspace.general_fail.message", ex.getMessage()),
+						L10N.t("dialog.vcs.sync_with_remote_workspace.general_fail.title"), JOptionPane.ERROR_MESSAGE);
+				LOG.error("Failed to pull from remote!", ex);
+				actionRegistry.getMCreator().setCursor(Cursor.getDefaultCursor());
+				return;
 			}
 
 			// push local changes to remote in all cases
