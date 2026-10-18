@@ -584,11 +584,12 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 		return file.getCanonicalPath().equals(new File(workspace.getWorkspaceFolder(), vcsPath).getCanonicalPath());
 	}
 
-	private void mergeNormalFile(Workspace workspace, FileSyncHandle fileSyncHandle, MergeHandle<?> mergeHandle) {
+	private void mergeNormalFile(Workspace workspace, FileSyncHandle fileSyncHandle, MergeHandle<?> mergeHandle)
+			throws IOException {
 		if (fileSyncHandle.getChangeTypeRelativeTo(mergeHandle.getResultSide()) == DiffEntry.ChangeType.ADD
 				|| fileSyncHandle.getChangeTypeRelativeTo(mergeHandle.getResultSide()) == DiffEntry.ChangeType.MODIFY) {
-			FileIO.writeBytesToFile(fileSyncHandle.getBytes(mergeHandle.getResultSide()),
-					fileSyncHandle.toFileInWorkspace(workspace, mergeHandle.getResultSide()));
+			fileSyncHandle.writeTo(fileSyncHandle.toFileInWorkspace(workspace, mergeHandle.getResultSide()).toPath(),
+					mergeHandle.getResultSide());
 		} else if (fileSyncHandle.getChangeTypeRelativeTo(mergeHandle.getResultSide()) == DiffEntry.ChangeType.DELETE) {
 			File file = fileSyncHandle.toFileInWorkspace(workspace, mergeHandle.getResultSide());
 			if (file.isFile())

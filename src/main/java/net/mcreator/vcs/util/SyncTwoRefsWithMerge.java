@@ -23,9 +23,7 @@ package net.mcreator.vcs.util;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.diff.DiffEntry;
-import org.eclipse.jgit.errors.MissingObjectException;
 import org.eclipse.jgit.lib.ObjectId;
-import org.eclipse.jgit.lib.ObjectLoader;
 import org.eclipse.jgit.merge.MergeStrategy;
 import org.eclipse.jgit.merge.RecursiveMerger;
 import org.eclipse.jgit.revwalk.RevCommit;
@@ -78,29 +76,21 @@ public class SyncTwoRefsWithMerge {
 			String basePath = entry.getOldPath();
 			String localPath = entry.getNewPath();
 
-			ObjectLoader localObject = null, baseObject = null;
+			FileSyncHandle.ObjectSource localObject = objectSource(git, entry.getNewId().toObjectId());
+			FileSyncHandle.ObjectSource baseObject = objectSource(git, entry.getOldId().toObjectId());
 
-			try {
-				localObject = git.getRepository().getObjectDatabase().open(entry.getNewId().toObjectId());
-			} catch (MissingObjectException moe) {
+			if (localObject == null)
 				localPath = basePath;
-			}
-
-			try {
-				baseObject = git.getRepository().getObjectDatabase().open(entry.getOldId().toObjectId());
-			} catch (MissingObjectException moe) {
+			if (baseObject == null)
 				basePath = localPath;
-			}
 
 			FileSyncHandle fileSyncHandle = new FileSyncHandle(basePath);
 			fileSyncHandle.setLocalPath(localPath);
 			fileSyncHandle.setUnmerged(unmergedPaths.contains(basePath) || unmergedPaths.contains(localPath));
-			if (baseObject != null)
-				fileSyncHandle.setBaseBytes(baseObject.getBytes());
+			fileSyncHandle.setBaseObject(baseObject);
 			fileSyncHandle.setRemotePath(basePath);
-			fileSyncHandle.setRemoteBytes(fileSyncHandle.getBaseBytes());
-			if (localObject != null)
-				fileSyncHandle.setLocalBytes(localObject.getBytes());
+			fileSyncHandle.setRemoteObject(baseObject);
+			fileSyncHandle.setLocalObject(localObject);
 			fileSyncHandles.add(fileSyncHandle);
 			handlesByBasePath.putIfAbsent(basePath, fileSyncHandle);
 
@@ -110,29 +100,22 @@ public class SyncTwoRefsWithMerge {
 			String basePath = entry.getOldPath();
 			String remotePath = entry.getNewPath();
 
-			ObjectLoader remoteObject = null, baseObject = null;
+			FileSyncHandle.ObjectSource remoteObject = objectSource(git, entry.getNewId().toObjectId());
+			FileSyncHandle.ObjectSource baseObject = objectSource(git, entry.getOldId().toObjectId());
 
-			try {
-				remoteObject = git.getRepository().getObjectDatabase().open(entry.getNewId().toObjectId());
-			} catch (MissingObjectException moe) {
+			if (remoteObject == null)
 				remotePath = basePath;
-			}
-
-			try {
-				baseObject = git.getRepository().getObjectDatabase().open(entry.getOldId().toObjectId());
-			} catch (MissingObjectException moe) {
+			if (baseObject == null)
 				basePath = remotePath;
-			}
 
 			// try to find existing handle
 			FileSyncHandle fileSyncHandle = handlesByBasePath.get(basePath);
 			// if we fail to find a handle, make a new one
 			if (fileSyncHandle == null) {
 				fileSyncHandle = new FileSyncHandle(basePath);
-				if (baseObject != null)
-					fileSyncHandle.setBaseBytes(baseObject.getBytes());
+				fileSyncHandle.setBaseObject(baseObject);
 				fileSyncHandle.setLocalPath(basePath);
-				fileSyncHandle.setLocalBytes(fileSyncHandle.getBaseBytes());
+				fileSyncHandle.setLocalObject(baseObject);
 				fileSyncHandles.add(fileSyncHandle);
 				handlesByBasePath.put(basePath, fileSyncHandle);
 			}
@@ -140,7 +123,7 @@ public class SyncTwoRefsWithMerge {
 				fileSyncHandle.setUnmerged(unmergedPaths.contains(basePath) || unmergedPaths.contains(remotePath));
 			}
 
-			fileSyncHandle.setRemoteBytes(remoteObject != null ? remoteObject.getBytes() : null);
+			fileSyncHandle.setRemoteObject(remoteObject);
 			fileSyncHandle.setRemotePath(remotePath);
 		}
 
@@ -152,6 +135,12 @@ public class SyncTwoRefsWithMerge {
 				dryRun);
 
 		return new SyncResult(requiredCustomMergeHandler, requiredUserInteraction);
+	}
+
+	private static FileSyncHandle.ObjectSource objectSource(Git git, ObjectId id) throws IOException {
+		if (ObjectId.zeroId().equals(id) || !git.getRepository().getObjectDatabase().has(id))
+			return null;
+		return () -> git.getRepository().getObjectDatabase().open(id);
 	}
 
 	public interface PreCustomMergeAction {

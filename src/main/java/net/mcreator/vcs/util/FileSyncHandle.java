@@ -24,16 +24,33 @@ import net.mcreator.vcs.util.diff.MergeHandle;
 import net.mcreator.vcs.util.diff.ResultSide;
 import net.mcreator.workspace.Workspace;
 import org.eclipse.jgit.diff.DiffEntry;
+import org.eclipse.jgit.lib.ObjectLoader;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.AclFileAttributeView;
+import java.nio.file.attribute.PosixFileAttributeView;
 
 public class FileSyncHandle {
 
 	private byte[] remoteBytes, localBytes, baseBytes;
+	private ObjectSource remoteObject, localObject, baseObject;
 	private String remotePath;
 	private String localPath;
 	private final String basePath;
 	private boolean unmerged;
+
+	@FunctionalInterface interface ObjectSource {
+		ObjectLoader open() throws IOException;
+	}
 
 	FileSyncHandle(String basePath) {
 		this.basePath = basePath;
@@ -41,14 +58,32 @@ public class FileSyncHandle {
 
 	void setRemoteBytes(byte[] remoteBytes) {
 		this.remoteBytes = remoteBytes;
+		this.remoteObject = null;
 	}
 
 	void setLocalBytes(byte[] localBytes) {
 		this.localBytes = localBytes;
+		this.localObject = null;
 	}
 
 	void setBaseBytes(byte[] baseBytes) {
 		this.baseBytes = baseBytes;
+		this.baseObject = null;
+	}
+
+	void setRemoteObject(ObjectSource remoteObject) {
+		this.remoteObject = remoteObject;
+		this.remoteBytes = null;
+	}
+
+	void setLocalObject(ObjectSource localObject) {
+		this.localObject = localObject;
+		this.localBytes = null;
+	}
+
+	void setBaseObject(ObjectSource baseObject) {
+		this.baseObject = baseObject;
+		this.baseBytes = null;
 	}
 
 	void setUnmerged(boolean unmerged) {
@@ -63,16 +98,16 @@ public class FileSyncHandle {
 		this.localPath = localPath;
 	}
 
-	public byte[] getRemoteBytes() {
-		return remoteBytes;
+	public byte[] getRemoteBytes() throws IOException {
+		return remoteObject != null ? remoteObject.open().getBytes() : remoteBytes;
 	}
 
-	public byte[] getLocalBytes() {
-		return localBytes;
+	public byte[] getLocalBytes() throws IOException {
+		return localObject != null ? localObject.open().getBytes() : localBytes;
 	}
 
-	public byte[] getBaseBytes() {
-		return baseBytes;
+	public byte[] getBaseBytes() throws IOException {
+		return baseObject != null ? baseObject.open().getBytes() : baseBytes;
 	}
 
 	public String getBasePath() {
@@ -95,12 +130,56 @@ public class FileSyncHandle {
 		};
 	}
 
-	public byte[] getBytes(ResultSide resultSide) {
+	public byte[] getBytes(ResultSide resultSide) throws IOException {
 		return switch (resultSide) {
 			case LOCAL -> getLocalBytes();
 			case REMOTE -> getRemoteBytes();
 			default -> getBaseBytes();
 		};
+	}
+
+	void writeTo(Path destination, ResultSide resultSide) throws IOException {
+		ObjectSource object = switch (resultSide) {
+			case LOCAL -> localObject;
+			case REMOTE -> remoteObject;
+			default -> baseObject;
+		};
+		Path parent = destination.toAbsolutePath().getParent();
+		Files.createDirectories(parent);
+		Path temporary = Files.createTempFile(parent, ".vcs-merge-", ".tmp");
+		try {
+			PosixFileAttributeView attributes = Files.getFileAttributeView(destination, PosixFileAttributeView.class,
+					LinkOption.NOFOLLOW_LINKS);
+			if (attributes != null && Files.isRegularFile(destination, LinkOption.NOFOLLOW_LINKS))
+				Files.setPosixFilePermissions(temporary, attributes.readAttributes().permissions());
+			AclFileAttributeView acl = Files.getFileAttributeView(destination, AclFileAttributeView.class,
+					LinkOption.NOFOLLOW_LINKS);
+			if (acl != null && Files.isRegularFile(destination, LinkOption.NOFOLLOW_LINKS))
+				Files.getFileAttributeView(temporary, AclFileAttributeView.class).setAcl(acl.getAcl());
+			try (InputStream input = object != null ? object.open().openStream() : new ByteArrayInputStream(getBytes(resultSide));
+					OutputStream output = Files.newOutputStream(temporary)) {
+				input.transferTo(output);
+			}
+			try {
+				Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+			} catch (AtomicMoveNotSupportedException ex) {
+				Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
+			}
+		} finally {
+			Files.deleteIfExists(temporary);
+		}
+	}
+
+	private boolean hasBase() {
+		return baseObject != null || baseBytes != null;
+	}
+
+	private boolean hasLocal() {
+		return localObject != null || localBytes != null;
+	}
+
+	private boolean hasRemote() {
+		return remoteObject != null || remoteBytes != null;
 	}
 
 	public DiffEntry.ChangeType getChangeTypeRelativeTo(ResultSide resultSide) {
@@ -112,30 +191,30 @@ public class FileSyncHandle {
 	}
 
 	public DiffEntry.ChangeType getChangeTypeRelativeToLocal() {
-		if (baseBytes == null)
-			if (localBytes != null)
+		if (!hasBase())
+			if (hasLocal())
 				return DiffEntry.ChangeType.ADD;
 
-		if (baseBytes != null)
-			if (localBytes == null)
+		if (hasBase())
+			if (!hasLocal())
 				return DiffEntry.ChangeType.DELETE;
 
-		if (baseBytes != null)
+		if (hasBase())
 			return DiffEntry.ChangeType.MODIFY;
 
 		return null;
 	}
 
 	public DiffEntry.ChangeType getChangeTypeRelativeToRemote() {
-		if (baseBytes == null)
-			if (remoteBytes != null)
+		if (!hasBase())
+			if (hasRemote())
 				return DiffEntry.ChangeType.ADD;
 
-		if (baseBytes != null)
-			if (remoteBytes == null)
+		if (hasBase())
+			if (!hasRemote())
 				return DiffEntry.ChangeType.DELETE;
 
-		if (baseBytes != null)
+		if (hasBase())
 			return DiffEntry.ChangeType.MODIFY;
 
 		return null;
@@ -162,7 +241,7 @@ public class FileSyncHandle {
 	}
 
 	@Override public String toString() {
-		return basePath + (unmerged ? " (unmerged)" : "") + " - " + (remoteBytes != null ? "R" : "") + (
-				localBytes != null ? "L" : "") + (baseBytes != null ? "B" : "");
+		return basePath + (unmerged ? " (unmerged)" : "") + " - " + (hasRemote() ? "R" : "") + (
+				hasLocal() ? "L" : "") + (hasBase() ? "B" : "");
 	}
 }
