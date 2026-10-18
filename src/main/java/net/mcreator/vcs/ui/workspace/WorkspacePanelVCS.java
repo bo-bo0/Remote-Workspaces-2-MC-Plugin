@@ -22,6 +22,7 @@ package net.mcreator.vcs.ui.workspace;
 
 import net.mcreator.ui.component.TransparentToolBar;
 import net.mcreator.ui.component.util.ComponentUtils;
+import net.mcreator.ui.component.util.ThreadUtil;
 import net.mcreator.ui.dialogs.ProgressDialog;
 import net.mcreator.ui.init.L10N;
 import net.mcreator.ui.init.UIRES;
@@ -34,6 +35,7 @@ import net.mcreator.vcs.ui.actions.impl.SetupVCSAction;
 import net.mcreator.vcs.ui.component.BranchesPopup;
 import net.mcreator.vcs.util.DialogProgressMonitor;
 import net.mcreator.vcs.util.VCSCommits;
+import net.mcreator.vcs.util.VCSHistory;
 import net.mcreator.vcs.workspace.WorkspaceVCS;
 import net.mcreator.workspace.TerribleWorkspaceHacks;
 import org.apache.logging.log4j.LogManager;
@@ -41,10 +43,8 @@ import org.apache.logging.log4j.Logger;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.MergeCommand;
 import org.eclipse.jgit.api.ResetCommand;
-import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
-import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.merge.MergeStrategy;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.transport.CredentialsProvider;
@@ -63,14 +63,23 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 public class WorkspacePanelVCS extends AbstractWorkspacePanel {
 
 	private static final Logger LOG = LogManager.getLogger("VCS Panel");
+	private static final int HISTORY_PAGE_SIZE = 100;
 
 	private final List<RevCommit> cachedCommits = new ArrayList<>();
 	private final JTable commits;
 	private final TableRowSorter<TableModel> sorter;
+	private SwingWorker<VCSHistory.Page, Void> historyWorker;
+	private ObjectId historyHead;
+	private String historyBranch;
+	private int historyRequest;
+	private boolean historyLoading;
+	private final JButton loadMore = L10N.button("workspace.vcs.load_more_commits");
 
 	private final JButton switchBranch = new JButton(UIRES.get("16px.vcs"));
 
@@ -178,9 +187,13 @@ public class WorkspacePanelVCS extends AbstractWorkspacePanel {
 			}
 		}) {
 			@Override public String getToolTipText(@Nonnull MouseEvent event) {
+				int row = rowAtPoint(event.getPoint());
+				if (row < 0)
+					return null;
+				RevCommit commit = cachedCommits.get(convertRowIndexToModel(row));
 				return switch (columnAtPoint(event.getPoint())) {
-					case 0 -> cachedCommits.get(rowAtPoint(event.getPoint())).getName();
-					case 1 -> "<html>" + cachedCommits.get(rowAtPoint(event.getPoint())).getFullMessage()
+					case 0 -> commit.getName();
+					case 1 -> "<html>" + commit.getFullMessage()
 							.replaceAll("\\R", "<br>");
 					default -> null;
 				};
@@ -222,6 +235,13 @@ public class WorkspacePanelVCS extends AbstractWorkspacePanel {
 		holder.add(sp);
 
 		add("Center", holder);
+		loadMore.setVisible(false);
+		loadMore.addActionListener(e -> {
+			WorkspaceVCS current = WorkspaceVCS.getVCSWorkspace(workspacePanel.getMCreator().getWorkspace());
+			if (current != null && !historyLoading)
+				loadHistory(current, true);
+		});
+		add("South", loadMore);
 
 		commits.addMouseListener(new MouseAdapter() {
 			@Override public void mouseClicked(MouseEvent mouseEvent) {
@@ -233,13 +253,25 @@ public class WorkspacePanelVCS extends AbstractWorkspacePanel {
 	}
 
 	private void checkoutToSelectedCommit() {
+		if (!SwingUtilities.isEventDispatchThread()) {
+			SwingUtilities.invokeLater(this::checkoutToSelectedCommit);
+			return;
+		}
 		int row = commits.getSelectedRow();
-		if (row == -1)
+		if (row == -1 || historyLoading)
 			return;
 
 		WorkspaceVCS workspaceVCS = WorkspaceVCS.getVCSWorkspace(workspacePanel.getMCreator().getWorkspace());
-		String shortCommitId = commits.getValueAt(row, 0).toString();
-		if (shortCommitId == null || workspaceVCS == null)
+		if (workspaceVCS == null)
+			return;
+		RevCommit commit = cachedCommits.get(commits.convertRowIndexToModel(row));
+		int option = JOptionPane.showOptionDialog(workspacePanel.getMCreator(),
+				L10N.t("workspace.vcs.jump_commit_confirmation", commit.getShortMessage()),
+				L10N.t("workspace.vcs.jump_commit_confirmation.title"), JOptionPane.DEFAULT_OPTION,
+				JOptionPane.QUESTION_MESSAGE, null,
+				new String[] { L10N.t("workspace.vcs.jump_to", commit.abbreviate(7).name()),
+						UIManager.getString("OptionPane.cancelButtonText") }, null);
+		if (option != 0)
 			return;
 
 		ProgressDialog pd = new ProgressDialog(workspacePanel.getMCreator(),
@@ -248,78 +280,71 @@ public class WorkspacePanelVCS extends AbstractWorkspacePanel {
 			ProgressDialog.ProgressUnit pu = null;
 			try {
 				Git git = workspaceVCS.getGit();
-				for (RevCommit commit : git.log().add(git.getRepository().resolve(git.getRepository().getFullBranch()))
-						.call()) {
-					if (commit.abbreviate(7).name().equals(shortCommitId)) {
-						int option = JOptionPane.showOptionDialog(workspacePanel.getMCreator(),
-								L10N.t("workspace.vcs.jump_commit_confirmation", commit.getShortMessage()),
-								L10N.t("workspace.vcs.jump_commit_confirmation.title"), JOptionPane.DEFAULT_OPTION,
-								JOptionPane.QUESTION_MESSAGE, null,
-								new String[] { L10N.t("workspace.vcs.jump_to", commit.abbreviate(7).name()),
-										UIManager.getString("OptionPane.cancelButtonText") }, null);
+				if (!VCSHistory.isInCurrentHistory(git, commit))
+					throw new IOException("Selected commit is no longer in the current branch history");
+				// track all so they can be stashed properly
+				pd.addProgressUnit(pu = new ProgressDialog.ProgressUnit(
+						L10N.t("workspace.vcs.jump_to_selected_commit.stashing")));
+				git.rm().addFilepattern(".").call();
+				git.add().addFilepattern(".").call();
 
-						if (option == 0) {
-							// track all so they can be stashed properly
-							pd.addProgressUnit(pu = new ProgressDialog.ProgressUnit(
-									L10N.t("workspace.vcs.jump_to_selected_commit.stashing")));
-							git.rm().addFilepattern(".").call();
-							git.add().addFilepattern(".").call();
+				// remove local changes attempt 1
+				git.stashCreate().setPerson(workspaceVCS.getInfo().getCommitIdentity()).call();
+				git.stashDrop().call();
+				ThreadUtil.runOnSwingThreadAndWait(pu::markStateOk);
 
-							// remove local changes attempt 1
-							git.stashCreate().setPerson(workspaceVCS.getInfo().getCommitIdentity()).call();
-							git.stashDrop().call();
-							pu.markStateOk();
+				ObjectId currentBranchHead = git.getRepository().resolve(Constants.HEAD);
+				String oldBranch = git.getRepository().getFullBranch();
 
-							ObjectId currentBranchHead = git.getRepository().resolve(Constants.HEAD);
-							String oldBranch = git.getRepository().getFullBranch();
+				pd.addProgressUnit(pu = new ProgressDialog.ProgressUnit(
+						L10N.t("workspace.vcs.jump_to_selected_commit.jumping")));
+				git.checkout().setName(commit.getName()).setStartPoint(commit.getName()).call();
+				setProgress(pu, 17);
+				git.checkout().setName("tmpHistoryBranch" + commit.getName()).setCreateBranch(true).call();
+				setProgress(pu, 33);
+				String branchName = git.getRepository().getFullBranch();
+				VCSCommits.merge(git, git.merge().setStrategy(MergeStrategy.OURS).include(currentBranchHead)
+						.setFastForward(MergeCommand.FastForwardMode.NO_FF)
+						.setMessage("Jump back to commit " + commit.getName()), workspaceVCS.getInfo());
+				setProgress(pu, 50);
+				git.checkout().setName(oldBranch).call();
+				setProgress(pu, 67);
+				VCSCommits.merge(git, git.merge().include(git.getRepository().resolve(branchName)),
+						workspaceVCS.getInfo());
+				setProgress(pu, 83);
+				git.branchDelete().setBranchNames(branchName).call();
+				ThreadUtil.runOnSwingThreadAndWait(pu::markStateOk);
 
-							pd.addProgressUnit(pu = new ProgressDialog.ProgressUnit(
-									L10N.t("workspace.vcs.jump_to_selected_commit.jumping")));
-							git.checkout().setName(commit.getName()).setStartPoint(commit.getName()).call();
-							pu.setPercent(17);
-							git.checkout().setName("tmpHistoryBranch" + commit.getName()).setCreateBranch(true).call();
-							pu.setPercent(33);
-							String branchName = git.getRepository().getFullBranch();
-							VCSCommits.merge(git, git.merge().setStrategy(MergeStrategy.OURS).include(currentBranchHead)
-									.setFastForward(MergeCommand.FastForwardMode.NO_FF)
-									.setMessage("Jump back to commit " + commit.getName()), workspaceVCS.getInfo());
-							pu.setPercent(50);
-							git.checkout().setName(oldBranch).call();
-							pu.setPercent(67);
-							VCSCommits.merge(git, git.merge().include(git.getRepository().resolve(branchName)),
-									workspaceVCS.getInfo());
-							pu.setPercent(83);
-							git.branchDelete().setBranchNames(branchName).call();
-							pu.markStateOk();
-
-							// we might need to make another commit to commit the merge changes
-							try {
-								pd.addProgressUnit(pu = new ProgressDialog.ProgressUnit(
-										L10N.t("workspace.vcs.jump_to_selected_commit.cleaning")));
-								git.rm().addFilepattern(".").call();
-								git.add().addFilepattern(".").call();
-								VCSCommits.commit(git, workspaceVCS.getInfo()).setAll(true).setAllowEmpty(false)
-										.setMessage("Jump cleanup commit").call();
-								pu.markStateOk();
-							} catch (Exception ignored) {
-							}
-
-							TerribleWorkspaceHacks.reloadFromFS(workspacePanel.getMCreator().getWorkspace());
-							workspacePanel.reloadWorkspaceTab();
-							workspacePanel.getMCreator().getActionRegistry().buildWorkspace.doAction();
-						}
-
-						break;
-					}
+				// we might need to make another commit to commit the merge changes
+				try {
+					pd.addProgressUnit(pu = new ProgressDialog.ProgressUnit(
+							L10N.t("workspace.vcs.jump_to_selected_commit.cleaning")));
+					git.rm().addFilepattern(".").call();
+					git.add().addFilepattern(".").call();
+					VCSCommits.commit(git, workspaceVCS.getInfo()).setAll(true).setAllowEmpty(false)
+							.setMessage("Jump cleanup commit").call();
+					ThreadUtil.runOnSwingThreadAndWait(pu::markStateOk);
+				} catch (Exception ignored) {
 				}
-			} catch (GitAPIException | IOException e) {
-				LOG.error("Checkout failed!", e);
+
+				TerribleWorkspaceHacks.reloadFromFS(workspacePanel.getMCreator().getWorkspace());
+				ThreadUtil.runOnSwingThreadAndWait(() -> {
+					workspacePanel.reloadWorkspaceTab();
+					workspacePanel.getMCreator().getActionRegistry().buildWorkspace.doAction();
+				});
+			} catch (Exception ex) {
+				LOG.error("Checkout failed!", ex);
 				if (pu != null)
-					pu.markStateError();
+					ThreadUtil.runOnSwingThreadAndWait(pu::markStateError);
+			} finally {
+				pd.hideDialog();
 			}
-			pd.hideDialog();
 		}, "JumpToCommit").start();
 		pd.setVisible(true);
+	}
+
+	private static void setProgress(ProgressDialog.ProgressUnit unit, int percent) {
+		ThreadUtil.runOnSwingThreadAndWait(() -> unit.setPercent(percent));
 	}
 
 	@Override public boolean canSwitchToSection() {
@@ -327,40 +352,104 @@ public class WorkspacePanelVCS extends AbstractWorkspacePanel {
 	}
 
 	@Override public void reloadElements() {
-		WorkspaceVCS workspaceVCS = WorkspaceVCS.getVCSWorkspace(workspacePanel.getMCreator().getWorkspace());
-		if (workspaceVCS != null) {
-			int row = commits.getSelectedRow();
-
-			DefaultTableModel model = (DefaultTableModel) commits.getModel();
-			model.setRowCount(0);
+		if (!SwingUtilities.isEventDispatchThread()) {
+			SwingUtilities.invokeLater(this::reloadElements);
+			return;
+		}
+		WorkspaceVCS current = WorkspaceVCS.getVCSWorkspace(workspacePanel.getMCreator().getWorkspace());
+		if (historyWorker != null)
+			historyWorker.cancel(true);
+		historyRequest++;
+		if (current != null) {
+			loadHistory(current, false);
+		} else {
+			historyLoading = false;
+			historyHead = null;
+			((DefaultTableModel) commits.getModel()).setRowCount(0);
 			cachedCommits.clear();
-
-			Git git = workspaceVCS.getGit();
-			try {
-				Repository repository = git.getRepository();
-
-				switchBranch.setText(L10N.t("workspace.vcs.current_branch", repository.getBranch()));
-
-				for (RevCommit commit : git.log().add(repository.resolve(repository.getFullBranch())).call()) {
-					cachedCommits.add(commit);
-					model.addRow(new Object[] { commit.abbreviate(7).name(), "<html><b>" + commit.getShortMessage(),
-							commit.getAuthorIdent().getName(), Date.from(commit.getAuthorIdent().getWhenAsInstant()) });
-				}
-			} catch (Exception ignored) {
-			}
-
-			refilterElements();
-
-			try {
-				commits.setRowSelectionInterval(row, row);
-			} catch (Exception ignored) {
-			}
+			loadMore.setVisible(false);
 		}
 	}
 
+	private void loadHistory(WorkspaceVCS current, boolean append) {
+		int selectedRow = commits.getSelectedRow();
+		ObjectId selected = selectedRow >= 0 ? cachedCommits.get(commits.convertRowIndexToModel(selectedRow)).getId() : null;
+		int offset = append ? cachedCommits.size() : 0;
+		if (!append) {
+			((DefaultTableModel) commits.getModel()).setRowCount(0);
+			cachedCommits.clear();
+			historyHead = null;
+			loadMore.setVisible(false);
+		}
+		int request = ++historyRequest;
+		historyLoading = true;
+		loadMore.setEnabled(false);
+		commits.setEnabled(false);
+		historyWorker = VCSHistory.loadPage(current.getGit(), append ? historyHead : null, offset, HISTORY_PAGE_SIZE, page -> {
+			if (request != historyRequest || WorkspaceVCS.getVCSWorkspace(workspacePanel.getMCreator().getWorkspace()) != current)
+				return;
+			if (append && !page.branch().equals(historyBranch)) {
+				reloadElements();
+				return;
+			}
+			DefaultTableModel model = (DefaultTableModel) commits.getModel();
+			if (!append) {
+				model.setRowCount(0);
+				cachedCommits.clear();
+			}
+			historyHead = page.head();
+			historyBranch = page.branch();
+			switchBranch.setText(L10N.t("workspace.vcs.current_branch", page.branch()));
+			for (RevCommit commit : page.commits()) {
+				cachedCommits.add(commit);
+				model.addRow(new Object[] { commit.abbreviate(7).name(), "<html><b>" + commit.getShortMessage(),
+						commit.getAuthorIdent().getName(), Date.from(commit.getAuthorIdent().getWhenAsInstant()) });
+			}
+			historyLoading = false;
+			commits.setEnabled(true);
+			loadMore.setVisible(page.hasMore());
+			loadMore.setEnabled(true);
+			refilterElements();
+			if (selected != null)
+				for (int i = 0; i < cachedCommits.size(); i++) {
+					if (selected.equals(cachedCommits.get(i).getId())) {
+						int row = commits.convertRowIndexToView(i);
+						if (row >= 0)
+							commits.setRowSelectionInterval(row, row);
+						break;
+					}
+				}
+		}, ex -> {
+			if (request == historyRequest) {
+				historyLoading = false;
+				commits.setEnabled(true);
+				loadMore.setEnabled(true);
+				LOG.error("Failed to load commit history", ex);
+			}
+		});
+	}
+
+	@Override public void removeNotify() {
+		historyRequest++;
+		if (historyWorker != null)
+			historyWorker.cancel(true);
+		historyLoading = false;
+		super.removeNotify();
+	}
+
 	@Override public void refilterElements() {
-		if (WorkspaceVCS.getVCSWorkspace(workspacePanel.getMCreator().getWorkspace()) != null)
-			sorter.setRowFilter(RowFilter.regexFilter(workspacePanel.getSearchTerm()));
+		if (!SwingUtilities.isEventDispatchThread()) {
+			SwingUtilities.invokeLater(this::refilterElements);
+			return;
+		}
+		if (WorkspaceVCS.getVCSWorkspace(workspacePanel.getMCreator().getWorkspace()) != null) {
+			String search = workspacePanel.getSearchTerm();
+			try {
+				sorter.setRowFilter(RowFilter.regexFilter(search));
+			} catch (PatternSyntaxException ex) {
+				sorter.setRowFilter(RowFilter.regexFilter(Pattern.quote(search)));
+			}
+		}
 	}
 
 }

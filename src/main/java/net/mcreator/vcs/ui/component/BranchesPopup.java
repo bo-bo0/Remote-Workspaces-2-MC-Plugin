@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,6 +25,8 @@ import net.mcreator.ui.MCreator;
 import net.mcreator.ui.init.L10N;
 import net.mcreator.vcs.ui.actions.impl.BranchSwitchAction;
 import net.mcreator.vcs.workspace.WorkspaceVCS;
+import net.mcreator.vcs.util.DialogProgressMonitor;
+import net.mcreator.vcs.util.VCSCommits;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.jgit.api.CreateBranchCommand;
@@ -32,8 +35,10 @@ import org.eclipse.jgit.api.ListBranchCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.transport.RefSpec;
+import org.eclipse.jgit.transport.CredentialsProvider;
 
 import javax.swing.*;
+import java.awt.*;
 import java.io.IOException;
 import java.util.List;
 import java.util.function.Consumer;
@@ -65,9 +70,15 @@ public class BranchesPopup extends JPopupMenu {
 								mcreator.getWorkspacePanel().reloadWorkspaceTab();
 
 								try { // try to push if remote exists
-									git.push().setRemote("origin")
-											.setRefSpecs(new RefSpec(newBranchName + ":" + newBranchName)).call();
-								} catch (Exception ignored) {
+									if (git.getRepository().getRemoteNames().contains("origin")) {
+										CredentialsProvider credentials = workspaceVCS.getCredentialsProvider(mcreator.getWorkspaceFolder(), mcreator);
+										pushBranch(git, newBranchName, credentials, mcreator);
+									}
+								} catch (Exception ex) {
+									LOG.error("Failed to push new branch", ex);
+									JOptionPane.showMessageDialog(mcreator,
+											L10N.t("dialog.vcs.sync_with_remote_workspace.push_fail.message", ex.getMessage()),
+											L10N.t("dialog.vcs.sync_with_remote_workspace.push_fail.title"), JOptionPane.ERROR_MESSAGE);
 								}
 							} catch (GitAPIException | IOException er) {
 								LOG.error("Failed to create branch", er);
@@ -131,6 +142,17 @@ public class BranchesPopup extends JPopupMenu {
 			}
 		} catch (Exception ignored) {
 		}
+	}
+
+	static void pushBranch(Git git, String branchName, CredentialsProvider credentials, Window parent) throws Exception {
+		DialogProgressMonitor monitor = new DialogProgressMonitor(parent,
+				L10N.t("dialog.vcs.branches_popup.new_branch.title"));
+		DialogProgressMonitor.runTask(monitor, "BranchesPopup-PushBranch", () -> {
+			VCSCommits.checkPushResults(git.push().setRemote("origin")
+					.setRefSpecs(new RefSpec(branchName + ":" + branchName))
+					.setCredentialsProvider(credentials).setProgressMonitor(monitor).call());
+			return null;
+		});
 	}
 
 }
