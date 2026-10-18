@@ -170,17 +170,17 @@ public class SyncLocalWithRemoteAction extends VCSAction {
 
 			// push local changes to remote in all cases
 			try {
-				BranchTrackingStatus trackingStatus = BranchTrackingStatus.of(git.getRepository(),
-						git.getRepository().getFullBranch());
-
 				DialogProgressMonitor.runTask(monitor, "SyncLocalWithRemote", () -> {
 					PushCommand pushCommand = git.push();
 					pushCommand.setCredentialsProvider(credentialsProvider);
 					pushCommand.setProgressMonitor(monitor);
 					pushCommand.setRemote("origin").add(git.getRepository().getBranch());
-					return pushCommand.call();
+					VCSCommits.checkPushResults(pushCommand.call());
+					return null;
 				});
 
+				BranchTrackingStatus trackingStatus = BranchTrackingStatus.of(git.getRepository(),
+						git.getRepository().getBranch());
 				if (trackingStatus != null) {
 					actionRegistry.getMCreator().getStatusBar().setPersistentMessage(
 							L10N.t("statusbar.vcs.sync_with_remote_workspace.diff_message",

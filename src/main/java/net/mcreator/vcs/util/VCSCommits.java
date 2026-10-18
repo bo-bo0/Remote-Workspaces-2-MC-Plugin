@@ -30,10 +30,27 @@ import org.eclipse.jgit.lib.PersonIdent;
 import org.eclipse.jgit.lib.ProgressMonitor;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.transport.FetchResult;
+import org.eclipse.jgit.transport.PushResult;
+import org.eclipse.jgit.transport.RemoteRefUpdate;
 
 import java.io.IOException;
 
 public class VCSCommits {
+
+	public static void checkPushResults(Iterable<PushResult> results) throws IOException {
+		boolean hasUpdates = false;
+		for (PushResult result : results) {
+			for (RemoteRefUpdate update : result.getRemoteUpdates()) {
+				hasUpdates = true;
+				if (update.getStatus() != RemoteRefUpdate.Status.OK
+						&& update.getStatus() != RemoteRefUpdate.Status.UP_TO_DATE)
+					throw new IOException(update.getRemoteName() + ": " + update.getStatus()
+							+ (update.getMessage() != null ? " - " + update.getMessage() : ""));
+			}
+		}
+		if (!hasUpdates)
+			throw new IOException("Git push returned no ref updates");
+	}
 
 	public static CommitCommand commit(Git git, VCSInfo info) {
 		PersonIdent identity = info.getCommitIdentity();

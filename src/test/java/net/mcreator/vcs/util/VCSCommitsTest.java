@@ -25,6 +25,53 @@ class VCSCommitsTest {
 
 	private final VCSInfo info = new VCSInfo("git@example.invalid:owner/repo.git", "", null, true);
 
+	@Test void pushChecksSuccessfulAndUpToDateResults() throws Exception {
+		try (Git server = Git.init().setBare(true).setDirectory(directory.resolve("server").toFile()).call();
+				Git client = Git.init().setInitialBranch("local")
+						.setDirectory(directory.resolve("client").toFile()).call()) {
+			Files.writeString(client.getRepository().getWorkTree().toPath().resolve("workspace.txt"), "local work");
+			client.add().addFilepattern(".").call();
+			RevCommit local = VCSCommits.commit(client, info).setMessage("local").call();
+			for (int i = 0; i < 2; i++) {
+				VCSCommits.checkPushResults(client.push().setRemote(server.getRepository().getDirectory().toURI().toString())
+						.add("local").call());
+				assertEquals(local, server.getRepository().resolve("refs/heads/local"));
+				assertTrue(client.status().call().isClean());
+			}
+		}
+	}
+
+	@Test void rejectedPushReportsFailureAndPreservesBothRepositories() throws Exception {
+		try (Git server = Git.init().setBare(true).setDirectory(directory.resolve("server").toFile()).call();
+				Git client = Git.init().setInitialBranch("local")
+						.setDirectory(directory.resolve("client").toFile()).call()) {
+			Path file = client.getRepository().getWorkTree().toPath().resolve("workspace.txt");
+			Files.writeString(file, "base");
+			client.add().addFilepattern(".").call();
+			RevCommit base = VCSCommits.commit(client, info).setMessage("base").call();
+			String remote = server.getRepository().getDirectory().toURI().toString();
+			VCSCommits.checkPushResults(client.push().setRemote(remote).add("local").call());
+			Files.writeString(file, "remote work");
+			client.add().addFilepattern(".").call();
+			RevCommit remoteCommit = VCSCommits.commit(client, info).setMessage("remote").call();
+			VCSCommits.checkPushResults(client.push().setRemote(remote).add("local").call());
+			client.checkout().setCreateBranch(true).setName("diverged").setStartPoint(base).call();
+			Files.writeString(file, "keep local work");
+			client.add().addFilepattern(".").call();
+			RevCommit local = VCSCommits.commit(client, info).setMessage("local").call();
+
+			IOException failure = assertThrows(IOException.class, () -> VCSCommits.checkPushResults(
+					client.push().setRemote(remote).setRefSpecs(new org.eclipse.jgit.transport.RefSpec(
+							"refs/heads/diverged:refs/heads/local")).call()));
+
+			assertTrue(failure.getMessage().contains("REJECTED_NONFASTFORWARD"));
+			assertEquals(remoteCommit, server.getRepository().resolve("refs/heads/local"));
+			assertEquals(local, client.getRepository().resolve("HEAD"));
+			assertEquals("keep local work", Files.readString(file));
+			assertTrue(client.status().call().isClean());
+		}
+	}
+
 	@Test void ordinaryAndCleanupCommitsOverrideBothIdentitiesWithoutChangingGitConfig() throws Exception {
 		try (Git git = repository()) {
 			byte[] config = Files.readAllBytes(directory.resolve(".git/config"));
