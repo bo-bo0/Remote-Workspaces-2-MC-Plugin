@@ -17,6 +17,46 @@ import static org.junit.jupiter.api.Assertions.*;
 class VCSBranchesTest {
 	@TempDir Path directory;
 
+	@Test void checkoutUsesSelectedRemoteRefAndKeepsCompleteBranchName() throws Exception {
+		try (Git git = repository()) {
+			RevCommit selected = commit(git, "selected");
+			RevCommit unrelated = commit(git, "unrelated");
+			git.branchCreate().setName("test").call();
+			var config = git.getRepository().getConfig();
+			config.setString("remote", "origin", "url", "file:///unused");
+			config.setString("remote", "origin", "fetch", "+refs/heads/*:refs/remotes/origin/*");
+			var remote = git.getRepository().updateRef("refs/remotes/origin/feature/test");
+			remote.setNewObjectId(selected);
+			remote.update();
+			var fetchHead = git.getRepository().updateRef("FETCH_HEAD");
+			fetchHead.setNewObjectId(unrelated);
+			fetchHead.update();
+			VCSBranches.checkout(git, "refs/remotes/origin/feature/test");
+			assertEquals("feature/test", git.getRepository().getBranch());
+			assertEquals(selected, git.getRepository().resolve("HEAD"));
+			assertEquals(unrelated, git.getRepository().resolve("refs/heads/test"));
+			assertEquals("origin", config.getString("branch", "feature/test", "remote"));
+			assertEquals("refs/heads/feature/test", config.getString("branch", "feature/test", "merge"));
+		}
+	}
+
+	@Test void failedCheckoutPreservesUncommittedWorkAndCurrentBranch() throws Exception {
+		try (Git git = repository()) {
+			RevCommit base = commit(git, "base");
+			git.branchCreate().setName("feature/test").call();
+			RevCommit local = commit(git, "local");
+			Files.writeString(directory.resolve("workspace.txt"), "unsaved work");
+			byte[] index = Files.readAllBytes(directory.resolve(".git/index"));
+			assertThrows(Exception.class, () -> VCSBranches.checkout(git, "refs/heads/missing"));
+			assertThrows(Exception.class, () -> VCSBranches.checkout(git, "refs/heads/feature/test"));
+			assertEquals("local", git.getRepository().getBranch());
+			assertEquals(local, git.getRepository().resolve("HEAD"));
+			assertEquals(base, git.getRepository().resolve("refs/heads/feature/test"));
+			assertEquals("unsaved work", Files.readString(directory.resolve("workspace.txt")));
+			assertArrayEquals(index, Files.readAllBytes(directory.resolve(".git/index")));
+		}
+	}
+
 	@ParameterizedTest
 	@ValueSource(strings = { "origin", "team/server" })
 	void remoteDeletionUsesCompleteBranchAndSelectedRemote(String remoteName) throws Exception {

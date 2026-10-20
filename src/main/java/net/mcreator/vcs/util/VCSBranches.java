@@ -19,8 +19,11 @@
 package net.mcreator.vcs.util;
 
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.CheckoutCommand;
+import org.eclipse.jgit.api.CreateBranchCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.lib.Constants;
+import org.eclipse.jgit.lib.BranchConfig;
 import org.eclipse.jgit.lib.ProgressMonitor;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.transport.CredentialsProvider;
@@ -31,6 +34,31 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 
 public class VCSBranches {
+
+	public static void checkout(Git git, String name) throws GitAPIException, IOException, URISyntaxException {
+		Ref ref = git.getRepository().exactRef(name);
+		if (ref == null || ref.getObjectId() == null || ref.isSymbolic())
+			throw new IOException("Unknown branch: " + name);
+		CheckoutCommand command = git.checkout();
+		if (name.startsWith(Constants.R_HEADS)) {
+			command.setName(name.substring(Constants.R_HEADS.length()));
+		} else if (name.startsWith(Constants.R_REMOTES)) {
+			RemoteBranch remote = remoteBranch(git, name);
+			String local = remote.branch().substring(Constants.R_HEADS.length());
+			if (git.getRepository().exactRef(Constants.R_HEADS + local) == null) {
+				command.setName(local).setCreateBranch(true).setStartPoint(name)
+						.setUpstreamMode(CreateBranchCommand.SetupUpstreamMode.TRACK);
+			} else {
+				BranchConfig tracking = new BranchConfig(git.getRepository().getConfig(), local);
+				if (!remote.remote().equals(tracking.getRemote()) || !remote.branch().equals(tracking.getMerge()))
+					throw new IOException("Local branch already exists with different tracking: " + local);
+				command.setName(local);
+			}
+		} else {
+			throw new IOException("Not a branch: " + name);
+		}
+		command.call();
+	}
 
 	public static void delete(Git git, Ref ref, CredentialsProvider credentials, ProgressMonitor monitor)
 			throws GitAPIException, IOException, URISyntaxException {

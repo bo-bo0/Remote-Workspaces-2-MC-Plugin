@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,8 +26,8 @@ import net.mcreator.ui.MCreator;
 import net.mcreator.ui.action.impl.workspace.WorkspaceSettingsAction;
 import net.mcreator.ui.dialogs.workspace.WorkspaceGeneratorSetupDialog;
 import net.mcreator.ui.init.L10N;
-import net.mcreator.util.FilenameUtilsPatched;
 import net.mcreator.vcs.util.DialogProgressMonitor;
+import net.mcreator.vcs.util.VCSBranches;
 import net.mcreator.vcs.util.GSONClone;
 import net.mcreator.vcs.workspace.WorkspaceVCS;
 import net.mcreator.workspace.TerribleWorkspaceHacks;
@@ -35,17 +36,11 @@ import net.mcreator.workspace.settings.WorkspaceSettings;
 import net.mcreator.workspace.settings.WorkspaceSettingsChange;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.eclipse.jgit.api.CheckoutCommand;
 import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.api.ResetCommand;
-import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.lib.Constants;
-import org.eclipse.jgit.lib.Ref;
-import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.transport.CredentialsProvider;
 
 import javax.swing.*;
-import java.io.IOException;
 
 public class BranchSwitchAction {
 
@@ -57,39 +52,27 @@ public class BranchSwitchAction {
 		if (n == 0) {
 			Git git = workspaceVCS.getGit();
 
-			CredentialsProvider credentialsProvider = workspaceVCS.getCredentialsProvider(mcreator.getWorkspaceFolder(),
-					mcreator);
-
 			try {
 				Workspace localWorkspace = mcreator.getWorkspace();
 				WorkspaceSettings preSwitchSettings = GSONClone.deepClone(localWorkspace.getWorkspaceSettings(),
 						WorkspaceSettings.class);
 
 				try { // first try to fetch remote changes
-					DialogProgressMonitor monitor = new DialogProgressMonitor(mcreator,
-							L10N.t("dialog.vcs.switch_branch.title"));
-					DialogProgressMonitor.runTask(monitor, "BranchSwitchAction-Fetch",
-							() -> git.fetch().setRemote("origin").setCredentialsProvider(credentialsProvider)
-									.setProgressMonitor(monitor).call());
+					if (branchToSwitchTo.startsWith(Constants.R_REMOTES)) {
+						CredentialsProvider credentialsProvider = workspaceVCS.getCredentialsProvider(
+								mcreator.getWorkspaceFolder(), mcreator);
+						String remote = VCSBranches.remoteBranch(git, branchToSwitchTo).remote();
+						DialogProgressMonitor monitor = new DialogProgressMonitor(mcreator,
+								L10N.t("dialog.vcs.switch_branch.title"));
+						DialogProgressMonitor.runTask(monitor, "BranchSwitchAction-Fetch",
+								() -> git.fetch().setRemote(remote).setCredentialsProvider(credentialsProvider)
+										.setProgressMonitor(monitor).call());
+					}
 				} catch (Exception ignored) {
 				}
 
-				git.reset().setMode(ResetCommand.ResetType.HARD).call();
-
-				CheckoutCommand checkoutCommand = git.checkout();
-				checkoutCommand.setName(FilenameUtilsPatched.getName(branchToSwitchTo));
-				if (!git.branchList().call().stream().map(Ref::getName).toList()
-						.contains(Constants.R_HEADS + FilenameUtilsPatched.getName(branchToSwitchTo))) {
-					checkoutCommand.setCreateBranch(true);
-					Ref fetchHead = git.getRepository().findRef(Constants.FETCH_HEAD);
-					if (fetchHead != null && fetchHead.getObjectId() != null) {
-						for (RevCommit commit : git.log().add(fetchHead.getObjectId()).call()) {
-							checkoutCommand.setStartPoint(commit);
-							break;
-						}
-					}
-				}
-				checkoutCommand.call();
+				mcreator.getFileManager().saveWorkspaceDirectlyAndWait();
+				VCSBranches.checkout(git, branchToSwitchTo);
 
 				// possible refactor after sync start
 				TerribleWorkspaceHacks.reloadFromFS(mcreator.getWorkspace());
@@ -111,10 +94,10 @@ public class BranchSwitchAction {
 				// possible refactor after sync end
 
 				mcreator.getStatusBar().setPersistentMessage(L10N.t("statusbar.vcs.switched_working_branch",
-						FilenameUtilsPatched.getName(branchToSwitchTo)));
+						git.getRepository().getBranch()));
 
 				mcreator.getWorkspacePanel().reloadWorkspaceTab();
-			} catch (GitAPIException | IOException e) {
+			} catch (Exception e) {
 				LOG.error("Failed to switch branch!", e);
 				JOptionPane.showMessageDialog(mcreator,
 						L10N.t("dialog.vcs.switch_branch_fail.message", branchToSwitchTo, e.getMessage()),
