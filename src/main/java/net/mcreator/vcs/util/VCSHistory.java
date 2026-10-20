@@ -24,6 +24,7 @@ import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
+import net.mcreator.vcs.workspace.VCSInfo;
 
 import javax.swing.*;
 import java.io.IOException;
@@ -34,6 +35,10 @@ import java.util.concurrent.CancellationException;
 import java.util.function.Consumer;
 
 public class VCSHistory {
+
+	public static RevCommit stashBeforeCheckout(Git git, VCSInfo info) throws GitAPIException {
+		return git.stashCreate().setPerson(info.getCommitIdentity()).setIncludeUntracked(true).call();
+	}
 
 	public static boolean isInCurrentHistory(Git git, ObjectId commit) throws IOException {
 		ObjectId head = git.getRepository().resolve(Constants.HEAD);

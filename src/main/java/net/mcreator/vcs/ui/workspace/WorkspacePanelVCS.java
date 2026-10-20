@@ -280,8 +280,7 @@ public class WorkspacePanelVCS extends AbstractWorkspacePanel {
 				git.add().addFilepattern(".").call();
 
 				// remove local changes attempt 1
-				git.stashCreate().setPerson(workspaceVCS.getInfo().getCommitIdentity()).call();
-				git.stashDrop().call();
+				VCSHistory.stashBeforeCheckout(git, workspaceVCS.getInfo());
 				ThreadUtil.runOnSwingThreadAndWait(pu::markStateOk);
 
 				ObjectId currentBranchHead = git.getRepository().resolve(Constants.HEAD);

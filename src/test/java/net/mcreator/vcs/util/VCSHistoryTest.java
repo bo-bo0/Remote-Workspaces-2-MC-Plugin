@@ -28,6 +28,25 @@ class VCSHistoryTest extends SwingTestSupport {
 
 	@TempDir Path directory;
 
+	@Test void historyCheckoutNeverDropsExistingOrRecoveryStashes() throws Exception {
+		try (Git git = repository()) {
+			commit(git, "base");
+			var info = new net.mcreator.vcs.workspace.VCSInfo("", "", null, true);
+			Files.writeString(directory.resolve("workspace.txt"), "older stashed work");
+			RevCommit older = VCSHistory.stashBeforeCheckout(git, info);
+			assertNull(VCSHistory.stashBeforeCheckout(git, info));
+			assertEquals(List.of(older), new ArrayList<>(git.stashList().call()));
+			Files.writeString(directory.resolve("workspace.txt"), "current work");
+			Files.writeString(directory.resolve("untracked.txt"), "new work");
+			RevCommit recovery = VCSHistory.stashBeforeCheckout(git, info);
+			assertThrows(Exception.class, () -> git.checkout().setName("missing").call());
+			assertEquals(List.of(recovery, older), new ArrayList<>(git.stashList().call()));
+			git.stashApply().setStashRef(recovery.getName()).call();
+			assertEquals("current work", Files.readString(directory.resolve("workspace.txt")));
+			assertEquals("new work", Files.readString(directory.resolve("untracked.txt")));
+		}
+	}
+
 	@Test void pagesAreBoundedAndPinnedToTheOriginalHead() throws Exception {
 		try (Git git = repository()) {
 			List<ObjectId> expected = new ArrayList<>();
