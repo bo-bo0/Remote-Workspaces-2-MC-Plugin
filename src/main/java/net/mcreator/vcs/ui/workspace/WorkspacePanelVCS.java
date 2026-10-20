@@ -29,7 +29,6 @@ import net.mcreator.ui.init.UIRES;
 import net.mcreator.ui.laf.themes.Theme;
 import net.mcreator.ui.workspace.AbstractMainWorkspacePanel;
 import net.mcreator.ui.workspace.AbstractWorkspacePanel;
-import net.mcreator.util.FilenameUtilsPatched;
 import net.mcreator.vcs.ui.actions.VCSActionRegistry;
 import net.mcreator.vcs.ui.actions.impl.SetupVCSAction;
 import net.mcreator.vcs.ui.component.BranchesPopup;
@@ -48,7 +47,6 @@ import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.merge.MergeStrategy;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.transport.CredentialsProvider;
-import org.eclipse.jgit.transport.RefSpec;
 
 import javax.annotation.Nonnull;
 import javax.swing.*;
@@ -160,14 +158,8 @@ public class WorkspacePanelVCS extends AbstractWorkspacePanel {
 					DialogProgressMonitor monitor = new DialogProgressMonitor(workspacePanel.getMCreator(),
 							L10N.t("dialog.vcs.branches_popup.delete_branch"));
 					DialogProgressMonitor.runTask(monitor, "BranchesPopup-DeleteBranch", () -> {
-						VCSBranches.deleteLocal(git, ref.getName());
-						if (ref.getName().startsWith(Constants.R_REMOTES)) {
-							String dest = Constants.R_HEADS + FilenameUtilsPatched.getName(ref.getName());
-							git.push().setRemote("origin").setRefSpecs(new RefSpec(":" + dest).setSource(null))
-									.setCredentialsProvider(credentialsProvider).setProgressMonitor(monitor).call();
-						}
-						return git.fetch().setRemote("origin").setRemoveDeletedRefs(true)
-								.setCredentialsProvider(credentialsProvider).setProgressMonitor(monitor).call();
+						VCSBranches.delete(git, ref, credentialsProvider, monitor);
+						return null;
 					});
 					workspacePanel.reloadWorkspaceTab();
 				} catch (Exception er) {

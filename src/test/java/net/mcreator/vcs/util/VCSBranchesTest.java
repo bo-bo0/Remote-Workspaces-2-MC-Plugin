@@ -2,8 +2,12 @@ package net.mcreator.vcs.util;
 
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.transport.URIish;
+import org.eclipse.jgit.transport.RefSpec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,6 +16,27 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class VCSBranchesTest {
 	@TempDir Path directory;
+
+	@ParameterizedTest
+	@ValueSource(strings = { "origin", "team/server" })
+	void remoteDeletionUsesCompleteBranchAndSelectedRemote(String remoteName) throws Exception {
+		try (Git git = repository(); Git server = Git.init().setBare(true)
+				.setDirectory(directory.resolve("server").toFile()).call()) {
+			RevCommit head = commit(git, "base");
+			git.remoteAdd().setName(remoteName).setUri(new URIish(server.getRepository().getDirectory().toURI().toString())).call();
+			VCSCommits.checkPushResults(git.push().setRemote(remoteName).setRefSpecs(
+					new RefSpec("refs/heads/local:refs/heads/feature/test"),
+					new RefSpec("refs/heads/local:refs/heads/test")).call());
+			git.fetch().setRemote(remoteName).call();
+			Files.writeString(directory.resolve("workspace.txt"), "keep local work");
+			VCSBranches.delete(git, git.getRepository().exactRef("refs/remotes/" + remoteName + "/feature/test"), null, null);
+			assertNull(server.getRepository().exactRef("refs/heads/feature/test"));
+			assertEquals(head, server.getRepository().resolve("refs/heads/test"));
+			assertNull(git.getRepository().exactRef("refs/remotes/" + remoteName + "/feature/test"));
+			assertEquals(head, git.getRepository().resolve("HEAD"));
+			assertEquals("keep local work", Files.readString(directory.resolve("workspace.txt")));
+		}
+	}
 
 	@Test void deletionPreservesActiveBranchFilesAndIndexOnSuccessAndFailure() throws Exception {
 		try (Git git = repository()) {
