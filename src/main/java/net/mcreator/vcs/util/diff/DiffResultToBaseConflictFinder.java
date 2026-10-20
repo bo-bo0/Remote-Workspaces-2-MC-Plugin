@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,6 +24,7 @@ import net.mcreator.util.diff.DiffResult;
 import org.eclipse.jgit.diff.DiffEntry;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -30,10 +32,15 @@ import java.util.Set;
 public class DiffResultToBaseConflictFinder {
 
 	public static <T> Set<MergeHandle<T>> findConflicts(DiffResult<T> baseToLocal, DiffResult<T> baseToRemote) {
+		return findConflicts(baseToLocal, baseToRemote, null, null);
+	}
+
+	public static <T> Set<MergeHandle<T>> findConflicts(DiffResult<T> baseToLocal, DiffResult<T> baseToRemote,
+			Collection<T> localValues, Collection<T> remoteValues) {
 		Set<MergeHandle<T>> mergeHandlesSet = new HashSet<>();
 
-		List<AffectedObjectWithType<T>> affectedLocal = getAffected(baseToLocal);
-		List<AffectedObjectWithType<T>> affectedRemote = getAffected(baseToRemote);
+		List<AffectedObjectWithType<T>> affectedLocal = getAffected(baseToLocal, localValues);
+		List<AffectedObjectWithType<T>> affectedRemote = getAffected(baseToRemote, remoteValues);
 
 		for (AffectedObjectWithType<T> local : affectedLocal) {
 			for (AffectedObjectWithType<T> remote : affectedRemote) {
@@ -52,10 +59,11 @@ public class DiffResultToBaseConflictFinder {
 		return mergeHandlesSet;
 	}
 
-	private static <T> List<AffectedObjectWithType<T>> getAffected(DiffResult<T> diffResult) {
+	private static <T> List<AffectedObjectWithType<T>> getAffected(DiffResult<T> diffResult, Collection<T> values) {
 		List<AffectedObjectWithType<T>> retval = new ArrayList<>();
 		retval.addAll(
-				diffResult.changed().stream().map(e -> new AffectedObjectWithType<>(e, DiffEntry.ChangeType.MODIFY))
+				diffResult.changed().stream().map(e -> new AffectedObjectWithType<>(values != null
+						? values.stream().filter(e::equals).findFirst().orElseThrow() : e, DiffEntry.ChangeType.MODIFY))
 						.toList());
 		retval.addAll(
 				diffResult.removed().stream().map(e -> new AffectedObjectWithType<>(e, DiffEntry.ChangeType.DELETE))

@@ -183,8 +183,11 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 			DiffResult<ModElement> modElementListDiffRemoteToBase = ListDiff.getListDiff(baseWorkspace.getModElements(),
 					remoteWorkspace.getModElements());
 
-			conflictingModElements.addAll(DiffResultToBaseConflictFinder.findConflicts(modElementListDiffLocalToBase,
-					modElementListDiffRemoteToBase)); // add all that were affected on both diffs to conflicting list
+			Set<MergeHandle<ModElement>> workspaceModConflicts = DiffResultToBaseConflictFinder.findConflicts(
+					modElementListDiffLocalToBase, modElementListDiffRemoteToBase,
+					localWorkspace.getModElements(), remoteWorkspace.getModElements());
+			conflictingModElements.removeAll(workspaceModConflicts);
+			conflictingModElements.addAll(workspaceModConflicts); // add all that were affected on both diffs to conflicting list
 
 			if (!dryRun) {
 				localWorkspace.getModElementManager().invalidateCache();
@@ -244,7 +247,7 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 
 			conflictingVariableElements.addAll(
 					DiffResultToBaseConflictFinder.findConflicts(variableElementListDiffLocalToBase,
-							variableElementListDiffRemoteToBase));
+							variableElementListDiffRemoteToBase, localWorkspace.getVariableElements(), remoteWorkspace.getVariableElements()));
 
 			if (!dryRun) {
 				for (VariableElement removedVariableElement : variableElementListDiffLocalToBase.removed())
@@ -276,7 +279,7 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 
 			conflictingSoundElements.addAll(
 					DiffResultToBaseConflictFinder.findConflicts(soundElementListDiffLocalToBase,
-							soundElementListDiffRemoteToBase));
+							soundElementListDiffRemoteToBase, localWorkspace.getSoundElements(), remoteWorkspace.getSoundElements()));
 
 			if (!dryRun) {
 				for (SoundElement removedSoundElement : soundElementListDiffLocalToBase.removed())

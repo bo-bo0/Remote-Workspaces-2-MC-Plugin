@@ -1,6 +1,7 @@
 /*
  * MCreator VCS plugin
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -38,7 +39,8 @@ public class FolderSyncHandler {
 				base.getDirectFolderChildren(), remote.getDirectFolderChildren());
 
 		Set<MergeHandle<FolderElement>> conflictingFolderElements = DiffResultToBaseConflictFinder.findConflicts(
-				folderElementListDiffLocalToBase, folderElementListDiffRemoteToBase);
+				folderElementListDiffLocalToBase, folderElementListDiffRemoteToBase,
+				local.getDirectFolderChildren(), remote.getDirectFolderChildren());
 
 		if (!conflictingFolderElements.isEmpty())
 			return false;
