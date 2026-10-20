@@ -3,6 +3,7 @@ package net.mcreator.vcs.workspace;
 import net.mcreator.workspace.Workspace;
 import net.mcreator.workspace.WorkspaceFolderManager;
 import net.mcreator.workspace.settings.WorkspaceSettings;
+import net.mcreator.vcs.SwingTestSupport;
 import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -13,9 +14,43 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class WorkspaceVCSLifecycleTest {
+class WorkspaceVCSLifecycleTest extends SwingTestSupport {
 
 	@TempDir Path directory;
+
+	@Test void unlinkPreservesHistoryAndCanReconnectWithoutReinitializingRepository() throws Exception {
+		Workspace workspace = workspace();
+		try (Git git = Git.init().setInitialBranch("local").setDirectory(directory.toFile()).call();
+				Git server = Git.init().setBare(true).setDirectory(directory.resolve("server").toFile()).call()) {
+			Path file = directory.resolve("workspace.txt");
+			Files.writeString(file, "local work");
+			git.add().addFilepattern("workspace.txt").call();
+			var head = git.commit().setMessage("local").setAuthor("Test", "test@example.com")
+					.setCommitter("Test", "test@example.com").call();
+			VCSInfo info = new VCSInfo(server.getRepository().getDirectory().toURI().toString(), "", "", true);
+			git.remoteAdd().setName("origin").setUri(new org.eclipse.jgit.transport.URIish(info.getRemote())).call();
+			Files.writeString(file, "stashed work");
+			var stash = git.stashCreate().setPerson(info.getCommitIdentity()).call();
+			Files.writeString(file, "uncommitted work");
+			Path settings = directory.resolve(".mcreator/vcsInfo");
+			VCSInfo.saveToFile(info, settings.toFile());
+			byte[] config = Files.readAllBytes(directory.resolve(".git/config"));
+			try {
+				assertTrue(WorkspaceVCS.loadVCSWorkspace(workspace));
+				WorkspaceVCS.removeVCSWorkspace(workspace);
+				assertNull(WorkspaceVCS.getVCSWorkspace(workspace));
+				assertFalse(Files.exists(settings));
+				VCSInfo reconnect = new VCSInfo(info.getRemote(), "", "", true);
+				assertTrue(onSwingThread(() -> WorkspaceVCS.initNewVCSWorkspace(workspace, reconnect, null)));
+				assertArrayEquals(config, Files.readAllBytes(directory.resolve(".git/config")));
+				assertEquals(head, git.getRepository().resolve("HEAD"));
+				assertEquals(stash, git.stashList().call().iterator().next());
+				assertEquals("uncommitted work", Files.readString(file));
+			} finally {
+				WorkspaceVCS.releaseVCSWorkspace(workspace);
+			}
+		}
+	}
 
 	@Test void releaseIsIdempotentAndPreservesRepositorySettingsAndStashes() throws Exception {
 		Workspace first = workspace();

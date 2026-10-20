@@ -2,6 +2,7 @@
  * MCreator VCS plugin
  * Copyright (C) 2020 Pylo and contributors
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,6 +27,7 @@ import net.mcreator.ui.workspace.AbstractWorkspacePanel;
 import net.mcreator.vcs.workspace.WorkspaceVCS;
 
 import javax.swing.*;
+import java.io.IOException;
 
 public class UnlinkVCSAction extends VCSAction {
 
@@ -34,15 +36,20 @@ public class UnlinkVCSAction extends VCSAction {
 			int n = JOptionPane.showConfirmDialog(actionRegistry.getMCreator(), L10N.t("dialog.vcs.unlink.message"),
 					L10N.t("common.confirmation"), JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
 			if (n == JOptionPane.YES_OPTION) {
-				WorkspaceVCS.removeVCSWorkspace(actionRegistry.getMCreator().getWorkspace());
-				actionRegistry.getActions().stream().filter(action -> action instanceof VCSAction)
-						.forEach(action -> ((VCSAction) action).vcsStateChanged());
 				try {
-					actionRegistry.getMCreator().getWorkspacePanel().switchToVerticalTab(
-							actionRegistry.getMCreator().getWorkspacePanel().getVerticalTab(
-									(Class<? extends AbstractWorkspacePanel>) Class.forName(
-											"net.mcreator.ui.workspace.WorkspacePanel.WorkspacePanelMods")));
-				} catch (ClassNotFoundException ignored) {
+					WorkspaceVCS.removeVCSWorkspace(actionRegistry.getMCreator().getWorkspace());
+					actionRegistry.getActions().stream().filter(action -> action instanceof VCSAction)
+							.forEach(action -> ((VCSAction) action).vcsStateChanged());
+					try {
+						actionRegistry.getMCreator().getWorkspacePanel().switchToVerticalTab(
+								actionRegistry.getMCreator().getWorkspacePanel().getVerticalTab(
+										(Class<? extends AbstractWorkspacePanel>) Class.forName(
+												"net.mcreator.ui.workspace.WorkspacePanel.WorkspacePanelMods")));
+					} catch (ClassNotFoundException ignored) {
+					}
+				} catch (IOException ex) {
+					JOptionPane.showMessageDialog(actionRegistry.getMCreator(), ex.getMessage(),
+							L10N.t("action.vcs.unlink"), JOptionPane.ERROR_MESSAGE);
 				}
 			}
 		});

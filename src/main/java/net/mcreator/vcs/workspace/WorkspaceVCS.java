@@ -39,6 +39,8 @@ import org.eclipse.jgit.transport.URIish;
 import javax.swing.*;
 import java.awt.*;
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -85,6 +87,17 @@ public class WorkspaceVCS {
 	public static boolean initNewVCSWorkspace(Workspace workspace, VCSInfo vcsInfo, Window parent) {
 		Git git = null;
 		try {
+			if (new File(workspace.getWorkspaceFolder(), ".git").exists()) {
+				try (Git existing = Git.open(workspace.getWorkspaceFolder())) {
+					String origin = existing.getRepository().getConfig().getString("remote", "origin", "url");
+					if (origin == null || !new URIish(origin).equals(new URIish(vcsInfo.getRemote()))
+							|| !vcsInfo.isValid(parent))
+						return false;
+				}
+				VCSInfo.saveToFile(vcsInfo, new File(workspace.getFolderManager().getWorkspaceCacheDir(), "vcsInfo"));
+				new WorkspaceVCS(workspace, vcsInfo);
+				return workspaces.containsKey(workspace.getWorkspaceFolder());
+			}
 			CredentialsProvider credentials = vcsInfo.getCredentialsProvider(workspace.getWorkspaceFolder(), parent);
 			DialogProgressMonitor monitor = new DialogProgressMonitor(parent,
 					L10N.t("dialog.vcs.setup_remote_workspace_details"));
@@ -148,9 +161,9 @@ public class WorkspaceVCS {
 		return workspaces.get(workspace.getWorkspaceFolder());
 	}
 
-	public static void removeVCSWorkspace(Workspace workspace) {
-		new File(workspace.getFolderManager().getWorkspaceCacheDir(), "vcsInfo").delete();
-		closeVCS(workspaces.remove(workspace.getWorkspaceFolder()).git);
+	public static void removeVCSWorkspace(Workspace workspace) throws IOException {
+		Files.deleteIfExists(new File(workspace.getFolderManager().getWorkspaceCacheDir(), "vcsInfo").toPath());
+		releaseVCSWorkspace(workspace);
 	}
 
 	public static void releaseVCSWorkspace(Workspace workspace) {
@@ -171,12 +184,6 @@ public class WorkspaceVCS {
 			LOG.warn("Failed to check for Git repo", e);
 		}
 		return false;
-	}
-
-	private static void closeVCS(Git git) {
-		git.getRepository().close();
-		git.close();
-		FileIO.deleteDir(git.getRepository().getDirectory());
 	}
 
 }
