@@ -3,6 +3,8 @@ package net.mcreator.vcs.util;
 import net.mcreator.vcs.SwingTestSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import javax.swing.*;
 import java.awt.*;
@@ -13,6 +15,23 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @Timeout(15)
 class DialogProgressMonitorTest extends SwingTestSupport {
+
+	@ParameterizedTest
+	@CsvSource({ "1000,500,50", "200,50,25", "100,150,100", "0,50,0", "-1,50,0", "2147483647,1073741823,49" })
+	void progressUsesCompletedFractionAndHandlesUnknownTotals(int total, int completed, int expected) throws Exception {
+		DialogProgressMonitor monitor = onSwingThread(() -> new DialogProgressMonitor(null, "Progress"));
+		onSwingThread(() -> {
+			monitor.beginTask("copy", total);
+			monitor.update(completed);
+			var units = DialogProgressMonitor.class.getDeclaredField("units");
+			units.setAccessible(true);
+			Object unit = ((java.util.Stack<?>) units.get(monitor)).peek();
+			var percent = unit.getClass().getDeclaredField("percent");
+			percent.setAccessible(true);
+			assertEquals(expected, percent.getInt(unit));
+			return null;
+		});
+	}
 
 	@Test void fastTasksCompleteAndMonitorCanBeReused() throws Exception {
 		DialogProgressMonitor monitor = onSwingThread(() -> new DialogProgressMonitor(null, "Fast sync"));

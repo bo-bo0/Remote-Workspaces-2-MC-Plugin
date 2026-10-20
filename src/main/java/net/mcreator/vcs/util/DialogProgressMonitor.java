@@ -36,7 +36,8 @@ public class DialogProgressMonitor implements ProgressMonitor {
 	private final ProgressDialog dialog;
 	private final Stack<ProgressDialog.ProgressUnit> units = new Stack<>();
 	private int tasksTotal = -1, doneTotal;
-	private int tasksCurrent, doneCurrent;
+	private int tasksCurrent;
+	private long doneCurrent;
 
 	public static <T> T runTask(DialogProgressMonitor monitor, String threadName, Callable<T> task) throws Exception {
 		FutureTask<T> result = new FutureTask<>(() -> {
@@ -99,8 +100,12 @@ public class DialogProgressMonitor implements ProgressMonitor {
 	}
 
 	@Override public void update(int completed) {
-		if (!units.isEmpty())
-			units.peek().setPercent((int) (tasksCurrent / 100d * (doneCurrent += completed)));
+		doneCurrent += completed;
+		if (!units.isEmpty()) {
+			ProgressDialog.ProgressUnit unit = units.peek();
+			int percent = tasksCurrent > 0 ? (int) Math.clamp(doneCurrent * 100 / tasksCurrent, 0, 100) : 0;
+			ThreadUtil.runOnSwingThread(() -> unit.setPercent(percent));
+		}
 	}
 
 	@Override public void endTask() {
