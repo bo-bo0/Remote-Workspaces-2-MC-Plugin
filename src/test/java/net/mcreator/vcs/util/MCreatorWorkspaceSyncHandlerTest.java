@@ -101,6 +101,45 @@ class MCreatorWorkspaceSyncHandlerTest extends SwingTestSupport {
 		return handle;
 	}
 
+	@Test void failedWorkspaceSaveRestoresPreviousFileAndKeepsModelForRetry() throws Exception {
+		try (TestWorkspace workspace = new TestWorkspace(repository, "managed.txt", null)) {
+			Path file = workspace.getFileManager().getWorkspaceFile().toPath();
+			String original = WorkspaceFileManager.gson.toJson(workspace, Workspace.class);
+			Files.writeString(file, original);
+			workspace.getWorkspaceSettings().setAuthor("pending work");
+			workspace.getFileManager().setDataSavedListener(() -> {
+				try { Files.writeString(file, "{partial"); }
+				catch (IOException ex) { throw new java.io.UncheckedIOException(ex); }
+			});
+			assertThrows(IOException.class, () -> CheckedWorkspaceIO.save(workspace));
+			assertEquals(original, Files.readString(file));
+			assertEquals("pending work", workspace.getWorkspaceSettings().getAuthor());
+			workspace.getFileManager().setDataSavedListener(null);
+			CheckedWorkspaceIO.save(workspace);
+			assertTrue(Files.readString(file).contains("pending work"));
+		}
+	}
+
+	@Test void fileDeletionDoesNotRemoveDirectoriesOrFilesOutsideWorkspace() throws Exception {
+		Path root = repository.resolve("workspace");
+		Files.createDirectories(root);
+		try (TestWorkspace workspace = new TestWorkspace(root, "managed.txt", null)) {
+			Path directory = root.resolve("conflict.txt");
+			Files.createDirectories(directory);
+			Files.writeString(directory.resolve("untracked.txt"), "keep nested work");
+			Path outside = repository.resolve("outside.txt");
+			Files.writeString(outside, "keep outside work");
+			assertThrows(IOException.class, () -> CheckedWorkspaceIO.delete(workspace, directory));
+			assertThrows(IOException.class, () -> CheckedWorkspaceIO.delete(workspace, outside));
+			assertEquals("keep nested work", Files.readString(directory.resolve("untracked.txt")));
+			assertEquals("keep outside work", Files.readString(outside));
+			Path normal = root.resolve("removed.txt");
+			Files.writeString(normal, "delete selected file");
+			CheckedWorkspaceIO.delete(workspace, normal);
+			assertFalse(Files.exists(normal));
+		}
+	}
+
 	@Test void workspaceConflictPreservesOneSidedSettingsMetadataAndChangedVariables() throws Exception {
 		try (Git git = createRepository(); TestWorkspace workspace = new TestWorkspace(repository, "managed.txt", null)) {
 			var variable = new net.mcreator.workspace.elements.VariableElement("value");

@@ -54,7 +54,10 @@ public class SyncRemoteToLocalAction extends VCSAction {
 			actionRegistry.getMCreator().setCursor(new Cursor(Cursor.WAIT_CURSOR));
 
 			// save workspace to FS first here, so the changes get detected by git
-			actionRegistry.getMCreator().getFileManager().saveWorkspaceDirectlyAndWait();
+			if (!CheckedWorkspaceIO.save(actionRegistry.getMCreator())) {
+				actionRegistry.getMCreator().setCursor(Cursor.getDefaultCursor());
+				return;
+			}
 			// generate base at this point too
 			actionRegistry.getMCreator().getGenerator().generateBase();
 

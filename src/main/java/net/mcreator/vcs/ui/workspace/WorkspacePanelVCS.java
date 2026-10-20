@@ -41,6 +41,7 @@ import net.mcreator.workspace.TerribleWorkspaceHacks;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.errors.EmptyCommitException;
 import org.eclipse.jgit.api.MergeCommand;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
@@ -314,7 +315,7 @@ public class WorkspacePanelVCS extends AbstractWorkspacePanel {
 					VCSCommits.commit(git, workspaceVCS.getInfo()).setAll(true).setAllowEmpty(false)
 							.setMessage("Jump cleanup commit").call();
 					ThreadUtil.runOnSwingThreadAndWait(pu::markStateOk);
-				} catch (Exception ignored) {
+				} catch (EmptyCommitException ignored) {
 				}
 
 				TerribleWorkspaceHacks.reloadFromFS(workspacePanel.getMCreator().getWorkspace());

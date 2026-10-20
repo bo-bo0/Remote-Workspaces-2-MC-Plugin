@@ -40,6 +40,7 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.PushCommand;
 import org.eclipse.jgit.api.Status;
 import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.api.errors.EmptyCommitException;
 import org.eclipse.jgit.lib.*;
 import org.eclipse.jgit.transport.CredentialsProvider;
 
@@ -57,7 +58,10 @@ public class SyncLocalWithRemoteAction extends VCSAction {
 			boolean needsWorkspaceBuildAfter = false;
 
 			// save workspace to FS first here, so the changes get detected by git
-			actionRegistry.getMCreator().getFileManager().saveWorkspaceDirectlyAndWait();
+			if (!CheckedWorkspaceIO.save(actionRegistry.getMCreator())) {
+				actionRegistry.getMCreator().setCursor(Cursor.getDefaultCursor());
+				return;
+			}
 			// generate base at this point too
 			actionRegistry.getMCreator().getGenerator().generateBase();
 
@@ -129,7 +133,7 @@ public class SyncLocalWithRemoteAction extends VCSAction {
 						git.add().addFilepattern(".").call();
 						VCSCommits.commit(git, workspaceVCS.getInfo()).setAll(true).setAllowEmpty(false)
 								.setMessage("MCreator " + syncResult.mergeMessage()).call();
-					} catch (Exception ignored) {
+					} catch (EmptyCommitException ignored) {
 					}
 
 				}

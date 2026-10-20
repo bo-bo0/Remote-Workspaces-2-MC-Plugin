@@ -28,6 +28,7 @@ import net.mcreator.ui.dialogs.workspace.WorkspaceGeneratorSetupDialog;
 import net.mcreator.ui.init.L10N;
 import net.mcreator.vcs.util.DialogProgressMonitor;
 import net.mcreator.vcs.util.VCSBranches;
+import net.mcreator.vcs.util.CheckedWorkspaceIO;
 import net.mcreator.vcs.util.GSONClone;
 import net.mcreator.vcs.workspace.WorkspaceVCS;
 import net.mcreator.workspace.TerribleWorkspaceHacks;
@@ -71,7 +72,7 @@ public class BranchSwitchAction {
 				} catch (Exception ignored) {
 				}
 
-				mcreator.getFileManager().saveWorkspaceDirectlyAndWait();
+				CheckedWorkspaceIO.save(mcreator.getWorkspace());
 				VCSBranches.checkout(git, branchToSwitchTo);
 
 				// possible refactor after sync start

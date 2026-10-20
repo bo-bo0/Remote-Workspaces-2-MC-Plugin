@@ -544,7 +544,7 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 			TerribleWorkspaceHacks.loadStoredDataFrom(localWorkspace, merged);
 
 			// to be sure, we save workspace and load it back from file
-			localWorkspace.getFileManager().saveWorkspaceDirectlyAndWait();
+			CheckedWorkspaceIO.save(localWorkspace);
 			TerribleWorkspaceHacks.reloadFromFS(localWorkspace);
 		}
 
@@ -618,10 +618,7 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 					mergeHandle.getResultSide());
 		} else if (fileSyncHandle.getChangeTypeRelativeTo(mergeHandle.getResultSide()) == DiffEntry.ChangeType.DELETE) {
 			File file = fileSyncHandle.toFileInWorkspace(workspace, mergeHandle.getResultSide());
-			if (file.isFile())
-				file.delete();
-			else if (file.isDirectory())
-				FileIO.deleteDir(file);
+			CheckedWorkspaceIO.delete(workspace, file.toPath());
 		}
 	}
 
