@@ -35,6 +35,7 @@ import net.mcreator.vcs.ui.actions.impl.SetupVCSAction;
 import net.mcreator.vcs.ui.component.BranchesPopup;
 import net.mcreator.vcs.util.DialogProgressMonitor;
 import net.mcreator.vcs.util.VCSCommits;
+import net.mcreator.vcs.util.VCSBranches;
 import net.mcreator.vcs.util.VCSHistory;
 import net.mcreator.vcs.workspace.WorkspaceVCS;
 import net.mcreator.workspace.TerribleWorkspaceHacks;
@@ -42,7 +43,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.MergeCommand;
-import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.merge.MergeStrategy;
@@ -160,8 +160,7 @@ public class WorkspacePanelVCS extends AbstractWorkspacePanel {
 					DialogProgressMonitor monitor = new DialogProgressMonitor(workspacePanel.getMCreator(),
 							L10N.t("dialog.vcs.branches_popup.delete_branch"));
 					DialogProgressMonitor.runTask(monitor, "BranchesPopup-DeleteBranch", () -> {
-						git.reset().setMode(ResetCommand.ResetType.HARD).call();
-						git.branchDelete().setBranchNames(ref.getName()).setForce(true).call();
+						VCSBranches.deleteLocal(git, ref.getName());
 						if (ref.getName().startsWith(Constants.R_REMOTES)) {
 							String dest = Constants.R_HEADS + FilenameUtilsPatched.getName(ref.getName());
 							git.push().setRemote("origin").setRefSpecs(new RefSpec(":" + dest).setSource(null))
