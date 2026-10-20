@@ -109,7 +109,7 @@ public class SyncLocalWithRemoteAction extends VCSAction {
 					// possible refactor after sync start
 					TerribleWorkspaceHacks.reloadFromFS(actionRegistry.getMCreator().getWorkspace());
 					if (!localWorkspace.getWorkspaceSettings().getCurrentGenerator()
-							.equals(preMergeSettings.getCurrentGenerator())) {
+							.equals(localWorkspace.getGenerator().getGeneratorName())) {
 						LOG.debug("Switching local workspace generator to "
 								+ localWorkspace.getWorkspaceSettings().getCurrentGenerator());
 

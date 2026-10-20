@@ -1,6 +1,7 @@
 /*
  * MCreator VCS plugin
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,7 +19,8 @@
 
 package net.mcreator.workspace;
 
-import net.mcreator.io.FileIO;
+import net.mcreator.vcs.util.CheckedWorkspaceIO;
+import java.io.IOException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -30,12 +32,8 @@ public class TerribleWorkspaceHacks {
 		workspace.loadStoredDataFrom(other);
 	}
 
-	public static void reloadFromFS(Workspace workspace) {
-		workspace.getModElementManager().invalidateCache();
-		loadStoredDataFrom(workspace, WorkspaceFileManager.gson.fromJson(
-				FileIO.readFileToString(workspace.getFileManager().getWorkspaceFile()), Workspace.class));
-		workspace.getModElements().forEach(e -> e.reinit(workspace));
-		workspace.reloadFolderStructure();
+	public static void reloadFromFS(Workspace workspace) throws IOException {
+		CheckedWorkspaceIO.reload(workspace);
 		LOG.info("Reloaded current workspace from the workspace file");
 	}
 

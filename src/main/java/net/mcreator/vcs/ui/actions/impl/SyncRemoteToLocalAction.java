@@ -122,7 +122,7 @@ public class SyncRemoteToLocalAction extends VCSAction {
 
 					localWorkspace = actionRegistry.getMCreator().getWorkspace();
 					if (!localWorkspace.getWorkspaceSettings().getCurrentGenerator()
-							.equals(preMergeSettings.getCurrentGenerator())) {
+							.equals(localWorkspace.getGenerator().getGeneratorName())) {
 						LOG.debug("Switching local workspace generator to " + localWorkspace.getWorkspaceSettings()
 								.getCurrentGenerator());
 						WorkspaceGeneratorSetup.cleanupGeneratorForSwitchTo(localWorkspace,

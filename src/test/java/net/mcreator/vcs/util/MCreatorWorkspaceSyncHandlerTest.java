@@ -101,6 +101,31 @@ class MCreatorWorkspaceSyncHandlerTest extends SwingTestSupport {
 		return handle;
 	}
 
+	@ParameterizedTest
+	@ValueSource(booleans = { false, true })
+	void cleanWorkspaceMergeReloadsModelBeforeRegeneration(boolean missingGenerator) throws Exception {
+		try (Git git = createRepository(); TestWorkspace workspace = new TestWorkspace(repository, "managed.txt", null)) {
+			String base = WorkspaceFileManager.gson.toJson(workspace, Workspace.class);
+			Workspace remote = WorkspaceFileManager.gson.fromJson(base, Workspace.class);
+			remote.getWorkspaceSettings().setAuthor("Remote author");
+			if (missingGenerator)
+				remote.getWorkspaceSettings().setCurrentGenerator("missing-generator");
+			String after = WorkspaceFileManager.gson.toJson(remote);
+			Files.writeString(workspace.getFileManager().getWorkspaceFile().toPath(), after);
+			FileSyncHandle handle = workspaceHandle(base, base, after);
+			handle.setUnmerged(false);
+			if (missingGenerator) {
+				assertThrows(IOException.class, () -> new MCreatorWorkspaceSyncHandler(null).handleSync(git, workspace, List.of(handle), false));
+				assertEquals(0, workspace.testGenerator.regenerations);
+			} else {
+				assertFalse(new MCreatorWorkspaceSyncHandler(null).handleSync(git, workspace, List.of(handle), false));
+				assertEquals("Remote author", workspace.testGenerator.lastAuthor);
+				assertEquals("Remote author", workspace.getWorkspaceSettings().getAuthor());
+			}
+			assertEquals(after, Files.readString(workspace.getFileManager().getWorkspaceFile().toPath()));
+		}
+	}
+
 	@Test void failedWorkspaceSaveRestoresPreviousFileAndKeepsModelForRetry() throws Exception {
 		try (TestWorkspace workspace = new TestWorkspace(repository, "managed.txt", null)) {
 			Path file = workspace.getFileManager().getWorkspaceFile().toPath();
@@ -511,6 +536,7 @@ class MCreatorWorkspaceSyncHandlerTest extends SwingTestSupport {
 		private final GeneratorTemplate template;
 		private int regenerations;
 		private boolean failGeneration;
+		private String lastAuthor;
 
 		TestGenerator(Workspace workspace, File file, String comment) {
 			super(workspace);
@@ -528,6 +554,7 @@ class MCreatorWorkspaceSyncHandlerTest extends SwingTestSupport {
 
 		@Override public void generateBase(boolean formatAndOrganiseImports) throws TemplateGeneratorException {
 			regenerations++;
+			lastAuthor = getWorkspace().getWorkspaceSettings().getAuthor();
 			if (failGeneration)
 				throw new TemplateGeneratorException("test generation failure");
 			generateFiles(List.of(template.toGeneratorFile(mods("current", "") + mixins(""))), false);

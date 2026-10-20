@@ -21,14 +21,15 @@ package net.mcreator.vcs.util;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import java.nio.charset.StandardCharsets;
 import net.mcreator.Launcher;
 import net.mcreator.element.GeneratableElement;
 import net.mcreator.generator.Generator;
 import net.mcreator.generator.GeneratorTemplate;
+import net.mcreator.generator.setup.WorkspaceGeneratorSetup;
 import net.mcreator.generator.template.TemplateGeneratorException;
-import net.mcreator.io.FileIO;
 import net.mcreator.ui.MCreator;
+import net.mcreator.ui.component.util.ThreadUtil;
+import net.mcreator.ui.dialogs.workspace.WorkspaceGeneratorSetupDialog;
 import net.mcreator.util.MCreatorVersionNumber;
 import net.mcreator.util.diff.DiffResult;
 import net.mcreator.util.diff.GSONCompare;
@@ -53,6 +54,7 @@ import org.eclipse.jgit.diff.DiffEntry;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -549,6 +551,21 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 		}
 
 		// process workspace base files
+		if (!dryRun) {
+			if (workspaceFileHandle != null && !conflictsInWorkspaceFile)
+				CheckedWorkspaceIO.reload(localWorkspace);
+			String generator = localWorkspace.getWorkspaceSettings().getCurrentGenerator();
+			if (!generator.equals(localWorkspace.getGenerator().getGeneratorName())) {
+				var configuration = Generator.GENERATOR_CACHE.get(generator);
+				if (configuration == null || mcreator == null)
+					throw new IOException("Generator setup is required before regeneration: " + generator);
+				ThreadUtil.runOnSwingThreadAndWait(() -> {
+					WorkspaceGeneratorSetup.cleanupGeneratorForSwitchTo(localWorkspace, configuration);
+					localWorkspace.switchGenerator(generator);
+					WorkspaceGeneratorSetupDialog.runSetup(mcreator, false);
+				});
+			}
+		}
 		List<GeneratorTemplate> modBaseTemplates = localWorkspace.getGenerator().getModBaseGeneratorTemplatesList();
 		for (GeneratorTemplate generatorTemplate : modBaseTemplates) {
 			for (FileSyncHandle handle : handles) {

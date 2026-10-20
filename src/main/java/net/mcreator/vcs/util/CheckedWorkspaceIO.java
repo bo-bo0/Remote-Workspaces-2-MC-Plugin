@@ -23,6 +23,7 @@ import net.mcreator.ui.MCreator;
 import net.mcreator.ui.init.L10N;
 import net.mcreator.workspace.Workspace;
 import net.mcreator.workspace.WorkspaceFileManager;
+import net.mcreator.workspace.WorkspaceUtils;
 import net.mcreator.vcs.util.diff.ResultSide;
 
 import javax.swing.*;
@@ -33,6 +34,22 @@ import java.nio.file.Path;
 import java.util.Arrays;
 
 public class CheckedWorkspaceIO {
+
+	public static void reload(Workspace workspace) throws IOException {
+		try {
+			var file = workspace.getFileManager().getWorkspaceFile();
+			if (!file.isFile())
+				file = WorkspaceUtils.getWorkspaceFileForWorkspaceFolder(workspace.getWorkspaceFolder());
+			Workspace data = WorkspaceFileManager.gson.fromJson(Files.readString(file.toPath()), Workspace.class);
+			if (data == null || data.getWorkspaceSettings() == null || data.getFoldersRoot() == null
+					|| data.getWorkspaceSettings().getCurrentGenerator() == null || data.getLanguageMap() == null)
+				throw new IOException("Invalid workspace data: " + file);
+			data.reloadFolderStructure();
+			workspace.reloadFromFileSystem();
+		} catch (RuntimeException ex) {
+			throw new IOException("Failed to reload workspace", ex);
+		}
+	}
 
 	public static boolean save(MCreator mcreator) {
 		try {

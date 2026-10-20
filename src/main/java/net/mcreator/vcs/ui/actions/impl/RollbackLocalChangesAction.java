@@ -1,6 +1,7 @@
 /*
  * MCreator VCS plugin
  * Copyright (C) 2023, Defeatomizer
+ * Copyright (C) 2026, bo bo
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -38,6 +39,7 @@ import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 
 import javax.swing.*;
+import java.io.IOException;
 
 public class RollbackLocalChangesAction extends VCSAction {
 
@@ -78,7 +80,7 @@ public class RollbackLocalChangesAction extends VCSAction {
 					mcreator.getStatusBar().setPersistentMessage(L10N.t("statusbar.vcs.rolled_back_local_changes"));
 
 					mcreator.getWorkspacePanel().reloadWorkspaceTab();
-				} catch (GitAPIException ex) {
+				} catch (GitAPIException | IOException ex) {
 					LOG.error("Failed to rollback changes!", ex);
 					JOptionPane.showMessageDialog(mcreator,
 							L10N.t("dialog.vcs.rollback_changes.fail.message", ex.getMessage()),
