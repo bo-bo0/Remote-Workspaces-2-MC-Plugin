@@ -510,7 +510,7 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 		// if remote workspace was not null, we might have a merge so we set local workspace to after merge state
 		if (conflictsInWorkspaceFile && !dryRun) {
 			// local workspace is not at the same state as merged base workspace
-			TerribleWorkspaceHacks.loadStoredDataFrom(localWorkspace, baseWorkspace);
+			TerribleWorkspaceHacks.loadStoredDataFrom(localWorkspace, ((WorkspaceSnapshot) baseWorkspace).storedData());
 
 			// to be sure, we save workspace and load it back from file
 			localWorkspace.getFileManager().saveWorkspaceDirectlyAndWait();
@@ -569,18 +569,10 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 
 	private Workspace getVirtualWorkspace(Workspace original, String workspaceString, List<Generator> virtualGenerators)
 			throws IOException {
-		return new Workspace(null) {{
-			Workspace retval = WorkspaceFileManager.gson.fromJson(workspaceString, Workspace.class);
-			if (retval == null)
-				throw new IOException("Failed to parse workspace string");
-			TerribleWorkspaceHacks.loadStoredDataFrom(this, retval);
-			this.generator = new Generator(this);
-			virtualGenerators.add(this.generator);
-			this.generator.setGradleCache(this.generator.getGradleCache());
-			this.fileManager = original.getFileManager();
-			this.reloadModElements();
-			this.reloadFolderStructure();
-		}};
+		Workspace data = WorkspaceFileManager.gson.fromJson(workspaceString, Workspace.class);
+		if (data == null)
+			throw new IOException("Failed to parse workspace string");
+		return new WorkspaceSnapshot(original, data, virtualGenerators);
 	}
 
 	private boolean isVCSPathThisFile(Workspace workspace, String vcsPath, File file) throws IOException {

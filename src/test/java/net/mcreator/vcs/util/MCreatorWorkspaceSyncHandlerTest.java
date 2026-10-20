@@ -67,6 +67,9 @@ class MCreatorWorkspaceSyncHandlerTest extends SwingTestSupport {
 		PreferencesManager.PREFERENCES = new PreferencesData();
 		if (net.mcreator.plugin.PluginLoader.INSTANCE == null)
 			net.mcreator.plugin.PluginLoader.initInstance();
+		if (net.mcreator.element.ModElementType.UNKNOWN == null)
+			net.mcreator.element.ModElementType.UNKNOWN = new net.mcreator.element.ModElementType<>("unknown", null,
+					(a, b, c) -> null, net.mcreator.element.GeneratableElement.Unknown.class);
 	}
 
 	@Test void mergingOneLanguageDoesNotRemoveTranslationsFromOtherLanguages() throws Exception {
@@ -96,6 +99,39 @@ class MCreatorWorkspaceSyncHandlerTest extends SwingTestSupport {
 		handle.setRemotePath("test.mcreator");
 		handle.setUnmerged(true);
 		return handle;
+	}
+
+	@Test void virtualMutationsNeedNoHistoryAndDoNotDeleteRealSoundFiles() throws Exception {
+		try (TestWorkspace workspace = new TestWorkspace(repository, "managed.txt", null)) {
+			Workspace data = WorkspaceFileManager.gson.fromJson(
+					WorkspaceFileManager.gson.toJson(workspace, Workspace.class), Workspace.class);
+			List<Generator> generators = new ArrayList<>();
+			Path soundFile = repository.resolve("keep.ogg");
+			Files.writeString(soundFile, "keep sound data");
+			try {
+				WorkspaceSnapshot snapshot = new WorkspaceSnapshot(workspace, data, generators);
+				var element = new net.mcreator.workspace.elements.ModElement(workspace, "NewElement",
+						net.mcreator.element.ModElementType.UNKNOWN);
+				snapshot.addModElement(element);
+				snapshot.addLanguage("fr_fr", new java.util.LinkedHashMap<>(Map.of("key", "French")));
+				var variable = new net.mcreator.workspace.elements.VariableElement("value");
+				variable.setValue(12);
+				snapshot.addVariableElement(variable);
+				var sound = new net.mcreator.workspace.elements.SoundElement("sound",
+						List.of(repository.resolve("keep").toString()), "master", null);
+				snapshot.addSoundElement(sound);
+				snapshot.removeSoundElement(sound);
+				Workspace stored = snapshot.storedData();
+				assertNotNull(stored.getModElementByName("NewElement"));
+				assertNotNull(stored.getVariableElementByName("value"));
+				assertEquals("French", stored.getLanguageMap().get("fr_fr").get("key"));
+				assertTrue(workspace.getModElements().isEmpty());
+				assertFalse(workspace.getLanguageMap().containsKey("fr_fr"));
+				assertEquals("keep sound data", Files.readString(soundFile));
+			} finally {
+				generators.forEach(Generator::close);
+			}
+		}
 	}
 
 	@ParameterizedTest
