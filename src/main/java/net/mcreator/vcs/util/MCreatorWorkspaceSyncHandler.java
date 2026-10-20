@@ -353,11 +353,11 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 
 					for (String removedLangEntry : langMapContentsDiffLocalToBase.removed())
 						if (MergeHandle.isElementNotInMergeHandleCollection(conflictingLangEntries, removedLangEntry))
-							baseWorkspace.removeLocalizationEntryByKey(removedLangEntry);
+							baseWorkspace.getLanguageMap().get(language).remove(removedLangEntry);
 
 					for (String removedLangEntry : langMapContentsDiffRemoteToBase.removed())
 						if (MergeHandle.isElementNotInMergeHandleCollection(conflictingLangEntries, removedLangEntry))
-							baseWorkspace.removeLocalizationEntryByKey(removedLangEntry);
+							baseWorkspace.getLanguageMap().get(language).remove(removedLangEntry);
 
 					for (String addedLangEntry : langMapContentsDiffLocalToBase.added())
 						if (MergeHandle.isElementNotInMergeHandleCollection(conflictingLangEntries, addedLangEntry))

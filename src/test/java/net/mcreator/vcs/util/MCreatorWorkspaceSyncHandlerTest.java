@@ -65,6 +65,37 @@ class MCreatorWorkspaceSyncHandlerTest extends SwingTestSupport {
 
 	@BeforeAll static void initializePreferences() {
 		PreferencesManager.PREFERENCES = new PreferencesData();
+		if (net.mcreator.plugin.PluginLoader.INSTANCE == null)
+			net.mcreator.plugin.PluginLoader.initInstance();
+	}
+
+	@Test void mergingOneLanguageDoesNotRemoveTranslationsFromOtherLanguages() throws Exception {
+		try (Git git = createRepository(); TestWorkspace workspace = new TestWorkspace(repository, "managed.txt", null)) {
+			workspace.getLanguageMap().get("en_us").put("target", "English");
+			workspace.getLanguageMap().put("it_it", new java.util.LinkedHashMap<>(Map.of("target", "Italian")));
+			String base = WorkspaceFileManager.gson.toJson(workspace, Workspace.class);
+			workspace.getLanguageMap().get("it_it").remove("target");
+			workspace.getLanguageMap().get("it_it").put("local", "L");
+			Workspace remote = WorkspaceFileManager.gson.fromJson(base, Workspace.class);
+			remote.getLanguageMap().get("it_it").put("remote", "R");
+			FileSyncHandle handle = workspaceHandle(base, WorkspaceFileManager.gson.toJson(workspace, Workspace.class),
+					WorkspaceFileManager.gson.toJson(remote));
+			assertFalse(new MCreatorWorkspaceSyncHandler(null).handleSync(git, workspace, List.of(handle), false));
+			assertEquals("English", workspace.getLanguageMap().get("en_us").get("target"));
+			assertFalse(workspace.getLanguageMap().get("it_it").containsKey("target"));
+			assertEquals(Map.of("local", "L", "remote", "R"), workspace.getLanguageMap().get("it_it"));
+		}
+	}
+
+	private FileSyncHandle workspaceHandle(String base, String local, String remote) {
+		FileSyncHandle handle = new FileSyncHandle("test.mcreator");
+		handle.setBaseBytes(base.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+		handle.setLocalBytes(local.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+		handle.setRemoteBytes(remote.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+		handle.setLocalPath("test.mcreator");
+		handle.setRemotePath("test.mcreator");
+		handle.setUnmerged(true);
+		return handle;
 	}
 
 	@ParameterizedTest
@@ -318,7 +349,7 @@ class MCreatorWorkspaceSyncHandlerTest extends SwingTestSupport {
 
 	private static class TestWorkspace extends Workspace {
 
-		private final TestGenerator testGenerator;
+		private final transient TestGenerator testGenerator;
 
 		TestWorkspace(Path root, String path, String comment) throws Exception {
 			super(new WorkspaceSettings("test"));
