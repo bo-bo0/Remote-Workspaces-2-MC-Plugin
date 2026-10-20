@@ -101,6 +101,65 @@ class MCreatorWorkspaceSyncHandlerTest extends SwingTestSupport {
 		return handle;
 	}
 
+	@Test void workspaceConflictPreservesOneSidedSettingsMetadataAndChangedVariables() throws Exception {
+		try (Git git = createRepository(); TestWorkspace workspace = new TestWorkspace(repository, "managed.txt", null)) {
+			var variable = new net.mcreator.workspace.elements.VariableElement("value");
+			variable.setValue(0d);
+			workspace.addVariableElement(variable);
+			String base = WorkspaceFileManager.gson.toJson(workspace, Workspace.class);
+			workspace.getWorkspaceSettings().setAuthor("Local author");
+			workspace.putMetadata("local", "keep local metadata");
+			Workspace remote = WorkspaceFileManager.gson.fromJson(base, Workspace.class);
+			remote.getVariableElementByName("value").setValue(42);
+			remote.putMetadata("remote", "keep remote metadata");
+			FileSyncHandle handle = workspaceHandle(base, WorkspaceFileManager.gson.toJson(workspace, Workspace.class),
+					WorkspaceFileManager.gson.toJson(remote));
+			assertFalse(new MCreatorWorkspaceSyncHandler(null).handleSync(git, workspace, List.of(handle), false));
+			assertEquals("Local author", workspace.getWorkspaceSettings().getAuthor());
+			assertEquals(42d, ((Number) workspace.getVariableElementByName("value").getValue()).doubleValue());
+			assertEquals("keep local metadata", workspace.getMetadata("local"));
+			assertEquals("keep remote metadata", workspace.getMetadata("remote"));
+		}
+	}
+
+	@ParameterizedTest
+	@ValueSource(booleans = { false, true })
+	void metadataConflictsUseExplicitChoiceAndKeepIndependentValues(boolean chooseRemote) throws Exception {
+		try (Git git = createRepository(); TestWorkspace workspace = new TestWorkspace(repository, "managed.txt", null)) {
+			workspace.putMetadata("conflict", "base");
+			String base = WorkspaceFileManager.gson.toJson(workspace, Workspace.class);
+			workspace.putMetadata("conflict", "local");
+			workspace.putMetadata("localOnly", "L");
+			Workspace remote = WorkspaceFileManager.gson.fromJson(base, Workspace.class);
+			remote.putMetadata("conflict", "remote");
+			remote.putMetadata("remoteOnly", "R");
+			FileSyncHandle handle = workspaceHandle(base, WorkspaceFileManager.gson.toJson(workspace, Workspace.class),
+					WorkspaceFileManager.gson.toJson(remote));
+			Timer driver = onSwingThread(() -> {
+				Timer timer = new Timer(10, event -> {
+					for (Window window : Window.getWindows()) {
+						if (window instanceof JDialog dialog && dialog.isShowing()
+								&& dialog.getTitle().equals(L10N.t("dialog.vcs.file_merge_manual_required"))) {
+							((Timer) event.getSource()).stop();
+							button(dialog, chooseRemote ? "dialog.vcs.file_merge_all_remote" : "dialog.vcs.file_merge_all_local").doClick();
+							button(dialog, "dialog.vcs.file_merge_finish").doClick();
+						}
+					}
+				});
+				timer.start();
+				return timer;
+			});
+			try {
+				assertTrue(new MCreatorWorkspaceSyncHandler(null).handleSync(git, workspace, List.of(handle), false));
+				assertEquals(chooseRemote ? "remote" : "local", workspace.getMetadata("conflict"));
+				assertEquals("L", workspace.getMetadata("localOnly"));
+				assertEquals("R", workspace.getMetadata("remoteOnly"));
+			} finally {
+				onSwingThread(() -> { driver.stop(); return null; });
+			}
+		}
+	}
+
 	@Test void virtualMutationsNeedNoHistoryAndDoNotDeleteRealSoundFiles() throws Exception {
 		try (TestWorkspace workspace = new TestWorkspace(repository, "managed.txt", null)) {
 			Workspace data = WorkspaceFileManager.gson.fromJson(

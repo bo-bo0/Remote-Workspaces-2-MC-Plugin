@@ -19,6 +19,9 @@
 
 package net.mcreator.vcs.util;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import java.nio.charset.StandardCharsets;
 import net.mcreator.Launcher;
 import net.mcreator.element.GeneratableElement;
 import net.mcreator.generator.Generator;
@@ -87,18 +90,31 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 		Workspace baseWorkspace = null;
 
 		boolean conflictsInWorkspaceFile = false;
+		FileSyncHandle workspaceFileHandle = null;
+		JsonObject baseData = null, localData = null, remoteData = null;
+		Set<String> extraConflicts = new LinkedHashSet<>();
+		ResultSide extraSide = ResultSide.LOCAL;
 
 		// First we check if the remote has any changes on the workspace file
 		for (FileSyncHandle handle : handles) {
 			if (handle.getBasePath().equals(localWorkspace.getFileManager().getWorkspaceFile().getName())) {
+				workspaceFileHandle = handle;
 				conflictsInWorkspaceFile =
 						handle.isUnmerged() && handle.getChangeTypeRelativeToRemote() != DiffEntry.ChangeType.DELETE;
 				if (conflictsInWorkspaceFile)
-					baseWorkspace = getVirtualWorkspace(localWorkspace, new String(handle.getBaseBytes()), virtualGenerators);
+					baseWorkspace = getVirtualWorkspace(localWorkspace, new String(handle.getBaseBytes(), StandardCharsets.UTF_8), virtualGenerators);
 				if (handle.getChangeTypeRelativeToRemote() != DiffEntry.ChangeType.DELETE)
-					remoteWorkspace = getVirtualWorkspace(localWorkspace, new String(handle.getRemoteBytes()), virtualGenerators);
+					remoteWorkspace = getVirtualWorkspace(localWorkspace, new String(handle.getRemoteBytes(), StandardCharsets.UTF_8), virtualGenerators);
 				else
 					remoteWorkspace = baseWorkspace;
+				if (conflictsInWorkspaceFile) {
+					baseData = JsonParser.parseString(new String(handle.getBaseBytes(), StandardCharsets.UTF_8)).getAsJsonObject();
+					localData = WorkspaceFileManager.gson.toJsonTree(localWorkspace, Workspace.class).getAsJsonObject();
+					remoteData = JsonParser.parseString(new String(handle.getRemoteBytes(), StandardCharsets.UTF_8)).getAsJsonObject();
+					extraConflicts.addAll(WorkspaceDataMerge.conflictingFields(baseData, localData, remoteData));
+					extraConflicts.removeAll(Set.of("workspaceSettings", "mod_elements", "variable_elements",
+							"sound_elements", "language_map", "foldersRoot"));
+				}
 				unprocessedHandles.remove(handle);
 				break;
 			}
@@ -383,7 +399,12 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 						|| !conflictingSoundElements.isEmpty() || !conflictingVariableElements.isEmpty()
 						|| !conflictingLangMaps.isEmpty() || workspaceFoldersMergeHandle != null;
 
-		required_user_action = workspace_manual_merge_required;
+		required_user_action = workspace_manual_merge_required || !extraConflicts.isEmpty();
+		if (!dryRun && !extraConflicts.isEmpty()) {
+			MergeHandle<FileSyncHandle> extra = workspaceFileHandle.toPathMergeHandle();
+			VCSFileMergeDialog.show(mcreator, List.of(extra));
+			extraSide = extra.getResultSide();
+		}
 
 		if (!dryRun && workspace_manual_merge_required) {
 			// Show workspace merge dialog
@@ -510,7 +531,17 @@ public class MCreatorWorkspaceSyncHandler implements ICustomSyncHandler {
 		// if remote workspace was not null, we might have a merge so we set local workspace to after merge state
 		if (conflictsInWorkspaceFile && !dryRun) {
 			// local workspace is not at the same state as merged base workspace
-			TerribleWorkspaceHacks.loadStoredDataFrom(localWorkspace, ((WorkspaceSnapshot) baseWorkspace).storedData());
+			JsonObject resolved = WorkspaceFileManager.gson.toJsonTree(((WorkspaceSnapshot) baseWorkspace).storedData(), Workspace.class)
+					.getAsJsonObject();
+			JsonObject selected = extraSide == ResultSide.LOCAL ? localData : remoteData;
+			for (String field : extraConflicts) {
+				if (selected.has(field))
+					resolved.add(field, selected.get(field));
+				else
+					resolved.remove(field);
+			}
+			Workspace merged = WorkspaceFileManager.gson.fromJson(WorkspaceDataMerge.merge(baseData, localData, remoteData, resolved), Workspace.class);
+			TerribleWorkspaceHacks.loadStoredDataFrom(localWorkspace, merged);
 
 			// to be sure, we save workspace and load it back from file
 			localWorkspace.getFileManager().saveWorkspaceDirectlyAndWait();
